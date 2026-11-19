@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Billy Note</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="editor"></div>
+      <article id="preview" hidden></article>
+      <div id="drag" data-tauri-drag-region></div>
+      <header id="topbar">
+        <button class="tb-btn" id="tb-sidebar" tabindex="-1"></button>
+        <nav id="tabs" aria-label="Onglets"></nav>
+        <button class="tb-btn" id="tb-full" tabindex="-1"></button>
+      </header>
+      <div id="edge"></div>
+      <aside id="sidebar" aria-label="Notes"></aside>
+      <div id="overlay" hidden></div>
+      <div id="toast" role="status"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
