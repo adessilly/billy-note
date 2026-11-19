@@ -579,6 +579,14 @@ tabsEl.addEventListener("wheel", (e) => {
 }, { passive: true });
 sideBtn.addEventListener("click", () => (sidebarOpen ? closeSidebar() : openSidebar(true)));
 fullBtn.addEventListener("click", () => void toggleFullscreen());
+const minBtn = $("tb-min");
+minBtn.innerHTML = icon("minimize");
+minBtn.title = "Réduire";
+minBtn.addEventListener("click", () => void getCurrentWindow().minimize());
+const closeBtn = $("tb-close");
+closeBtn.innerHTML = icon("close");
+closeBtn.title = `Quitter (${MOD}Q)`;
+closeBtn.addEventListener("click", () => void quit());
 tabsEl.addEventListener("auxclick", (e) => {
   const id = (e.target as HTMLElement).closest<HTMLElement>("[data-id]")?.dataset.id;
   const t = byId(id);

@@ -246,6 +246,12 @@ html, body {
 .tb-btn:hover { color: var(--fg); background-color: var(--panel-solid); }
 .tb-btn:active { transform: scale(0.94); }
 
+/* Conteneur de droite : plein écran + fermer. */
+#tb-end { display: flex; align-items: center; gap: 10px; pointer-events: none; }
+/* macOS a déjà ses boutons de fenêtre natifs. Windows n'a plus de barre de titre. */
+.mac #tb-close, .mac #tb-min { display: none; }
+.win #tb-close:hover { color: #fff; background-color: #c42b1c; }
+
 #tabs {
   display: flex; gap: 2px; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none;
   padding: 3px; border-radius: 11px;
