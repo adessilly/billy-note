@@ -3,6 +3,22 @@
 Bloc-notes Markdown sans interface : une zone blanche ou noire, du texte.
 Tauri 2 (Rust) + CodeMirror 6. Environ 4 Mo.
 
+## Télécharger
+
+**[➜ Dernière version](https://github.com/adessilly/billy-note/releases/latest)** : en bas de la page, dans **Assets**, choisir :
+
+| Système | Fichier |
+|---|---|
+| macOS (Apple Silicon et Intel) | `Billy.Note_X.Y.Z_universal.dmg` : ouvrir, puis glisser Billy Note dans Applications |
+| Windows 10 / 11 | `Billy.Note_X.Y.Z_x64-setup.exe` : lancer l'installateur |
+
+L'application n'est pas signée, d'où un avertissement au premier lancement :
+
+- **Mac** : clic droit sur Billy Note → **Ouvrir**, puis confirmer (ou Réglages Système → Confidentialité et sécurité → **Ouvrir quand même**) ;
+- **Windows** : SmartScreen → **Informations complémentaires** → **Exécuter quand même**.
+
+Ensuite, l'application se met à jour toute seule (voir [Mises à jour automatiques](#mises-à-jour-automatiques)).
+
 ## Raccourcis (⌘ sur Mac, Ctrl sur Windows)
 
 | Action | Raccourci |
