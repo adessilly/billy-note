@@ -23,6 +23,8 @@ const paths: Record<string, string> = {
   shrink: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9"/>',
   power: '<path d="M12 3.5v8"/><path d="M6.6 7.2a7.5 7.5 0 1 0 10.8 0"/>',
+  download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   tabs: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M7 7.5V4.5h10v3"/>',
   find: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="M19 19l-4.5-4.5"/><path d="M3 21h6" />',
 };

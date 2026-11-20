@@ -409,6 +409,7 @@ kbd {
 }
 .pal-foot { display: flex; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--panel-line); font-size: 11.5px; color: var(--muted); }
 .pal-foot kbd { padding: 1px 5px; margin-right: 4px; font-size: 11px; }
+.pal-foot .pal-ver { margin-left: auto; font-variant-numeric: tabular-nums; }
 
 .switcher { width: min(420px, calc(100vw - 32px)); padding: 6px; max-height: 60vh; overflow-y: auto; }
 

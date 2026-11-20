@@ -59,7 +59,26 @@ Résultat : `src-tauri\target\release\billy-note.exe` (portable) et l'installate
 
 La compilation Windows depuis un Mac n'est pas prise en charge de façon fiable : utiliser un PC Windows ou GitHub Actions.
 
+Les deux compilations signent aussi l'archive de mise à jour : la clé privée doit être fournie par `TAURI_SIGNING_PRIVATE_KEY` (chemin ou contenu). `build:mac` lit `~/.tauri/billy-note.key` ; sur Windows, définir la variable avant `npm run build:win`.
+
 Les applications ne sont pas signées : sur un autre Mac, il faut faire clic droit → Ouvrir la première fois ; sur Windows, SmartScreen affiche « Informations complémentaires → Exécuter quand même ».
+
+## Mises à jour automatiques
+
+L'application vérifie au lancement (puis toutes les 12 h) si une version plus récente est publiée dans les [releases GitHub](https://github.com/adessilly/billy-note/releases), et propose de l'installer via ⌘K. ⌘K → « Rechercher une mise à jour » lance la vérification à la demande ; la version installée est affichée en bas de la palette d'actions.
+
+Les mises à jour sont signées : la clé publique est dans `src-tauri/tauri.conf.json`, la clé privée dans `~/.tauri/billy-note.key` (hors du dépôt, à sauvegarder : sans elle, les applications installées ne peuvent plus être mises à jour) et dans le secret GitHub `TAURI_SIGNING_PRIVATE_KEY`.
+
+### Publier une version
+
+```bash
+npm run bump 0.2.0
+git commit -am "chore: release v0.2.0"
+git tag v0.2.0
+git push && git push origin v0.2.0
+```
+
+Le tag déclenche `.github/workflows/release.yml` : compilation Mac (universel Apple Silicon + Intel) et Windows, signature, release GitHub avec `latest.json`. Le tag doit correspondre à la version de `tauri.conf.json`.
 
 ## Licence
 

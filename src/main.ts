@@ -8,6 +8,9 @@ import type { EditorState } from "@codemirror/state";
 import { openSearchPanel } from "@codemirror/search";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -697,9 +700,18 @@ interface Action {
   run: () => unknown;
   when?: () => boolean;
   active?: () => boolean;
+  sub?: () => string;
 }
 
 const actions: Action[] = [
+  {
+    title: "Installer la mise à jour",
+    keys: "update upgrade mise a jour installer nouvelle version",
+    icon: "download",
+    run: () => pendingUpdate && installUpdate(pendingUpdate),
+    when: () => !!pendingUpdate,
+    sub: () => `version ${pendingUpdate?.version}`,
+  },
   { title: "Nouvelle note", keys: "new creer ajouter brouillon", kbd: `${MOD}N`, icon: "plus", run: () => newDraft() },
   { title: "Enregistrer", keys: "save sauver", kbd: `${MOD}S`, icon: "save", run: save },
   { title: "Renommer", keys: "rename nom", icon: "rename", run: () => rename() },
@@ -741,12 +753,19 @@ const actions: Action[] = [
   { title: "Taille normale", keys: "zoom reset", kbd: `${MOD}0`, icon: "zoomReset", run: () => setZoom(16) },
   { title: "Plein écran", keys: "fullscreen", kbd: isMac ? "⌃⌘F" : "F11", icon: "expand", run: toggleFullscreen },
   { title: "Raccourcis clavier", keys: "aide help shortcuts", icon: "keyboard", run: () => showShortcuts() },
+  {
+    title: "Rechercher une mise à jour",
+    keys: "update upgrade mise a jour version verifier",
+    icon: "refresh",
+    run: () => checkForUpdate(true),
+    sub: () => `version ${appVersion}`,
+  },
   { title: "Quitter", keys: "quit exit", kbd: `${MOD}Q`, icon: "power", run: quit },
 ];
 
 const searchFooter = (q: string) =>
   q.startsWith("/")
-    ? `<span><kbd>↵</kbd> exécuter</span><span><kbd>⇥</kbd> compléter</span><span><kbd>⌫</kbd> notes</span><span><kbd>esc</kbd> fermer</span>`
+    ? `<span><kbd>↵</kbd> exécuter</span><span><kbd>⇥</kbd> compléter</span><span><kbd>⌫</kbd> notes</span><span><kbd>esc</kbd> fermer</span><span class="pal-ver">Billy Note ${esc(appVersion)}</span>`
     : `<span><kbd>↑↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>/</kbd> actions</span><span><kbd>esc</kbd> fermer</span>`;
 
 function actionItems(q: string): Item[] {
@@ -761,7 +780,7 @@ function actionItems(q: string): Item[] {
       kbd: a.kbd,
       icon: a.icon,
       active: a.active?.(),
-      sub: a.active?.() ? "actuel" : a.title.startsWith("Choisir le dossier") ? shortDir() : undefined,
+      sub: a.active?.() ? "actuel" : a.title.startsWith("Choisir le dossier") ? shortDir() : a.sub?.(),
       run: a.run,
     }));
 }
@@ -923,6 +942,60 @@ async function revealNotesDir() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Mises à jour (releases GitHub, signées) : vérifiées au lancement puis toutes
+// les 12 h, ou à la demande depuis ⌘K.
+// ---------------------------------------------------------------------------
+
+let appVersion = "";
+let pendingUpdate: Update | null = null;
+let updating = false;
+
+async function checkForUpdate(manual: boolean) {
+  if (updating) return;
+  if (manual) toast("Recherche de mises à jour…", 15000);
+  try {
+    const update = await check();
+    pendingUpdate = update;
+    if (!update) {
+      if (manual) toast(`Billy Note est à jour (version ${appVersion})`, 3000);
+    } else if (manual) {
+      toastEl.classList.remove("show");
+      ask(`Billy Note ${update.version} est disponible (version actuelle : ${appVersion})`, [
+        { title: "Installer et redémarrer", icon: "download", run: () => installUpdate(update) },
+        { title: "Plus tard", icon: "close", run: () => {} },
+      ]);
+    } else {
+      toast(`Billy Note ${update.version} est disponible : ${MOD}K pour l'installer`, 8000);
+    }
+  } catch (e) {
+    if (manual) toast(`Impossible de vérifier les mises à jour : ${e}`, 5000);
+  }
+}
+
+async function installUpdate(update: Update) {
+  if (updating) return;
+  updating = true;
+  try {
+    // Notes et brouillons d'abord : l'installation ferme l'application.
+    await flushAll();
+    let total = 0;
+    let received = 0;
+    await update.downloadAndInstall((ev) => {
+      if (ev.event === "Started") total = ev.data.contentLength ?? 0;
+      else if (ev.event === "Progress") {
+        received += ev.data.chunkLength;
+        const pct = total ? ` ${Math.min(100, Math.round((received / total) * 100))} %` : "";
+        toast(`Téléchargement de la mise à jour…${pct}`, 60000);
+      } else toast("Installation de la mise à jour…", 60000);
+    });
+    await relaunch();
+  } catch (e) {
+    updating = false;
+    toast(`Échec de la mise à jour : ${e}`, 5000);
+  }
+}
+
 async function quit() {
   await flushAll();
   await api.quit();
@@ -933,11 +1006,11 @@ async function quit() {
 // ---------------------------------------------------------------------------
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-function toast(msg: string) {
+function toast(msg: string, ms = 2200) {
   toastEl.textContent = msg;
   toastEl.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2200);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), ms);
 }
 
 // Barre de défilement visible seulement pendant le défilement ou près du bord.
@@ -1133,6 +1206,7 @@ async function restore() {
 }
 
 async function init() {
+  appVersion = (await getVersion().catch(() => "")) || "dev";
   try {
     const info = await api.appInfo();
     notesDir = info.notes_dir;
@@ -1158,6 +1232,10 @@ async function init() {
   window.addEventListener("blur", () => void saveSession());
   document.addEventListener("visibilitychange", () => void saveSession());
   void syncFullscreen();
+  if (!import.meta.env.DEV) {
+    setTimeout(() => void checkForUpdate(false), 5000);
+    setInterval(() => void checkForUpdate(false), 12 * 3600e3);
+  }
   await getCurrentWindow().onResized(() => void syncFullscreen());
   await listen("quit-requested", () => void quit());
   await getCurrentWindow().onCloseRequested(async () => {
