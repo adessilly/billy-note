@@ -13,13 +13,14 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { readImage as readClipboardImage } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, type NoteInfo } from "./backend";
 import { baseExtensions, createState } from "./editor";
 import { renderPreview } from "./preview";
 import { Palette, Switcher, type Item, type Source } from "./palette";
 import { icon } from "./icons";
-import { debounce, esc, fuzzy, highlight, relDate, uid } from "./util";
+import { debounce, dirname, esc, foldKeep, fuzzy, highlight, relDate, uid } from "./util";
 
 // ---------------------------------------------------------------------------
 // État
@@ -79,7 +80,19 @@ const states = new Map<string, EditorState>();
 const writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const writeChains = new Map<string, Promise<void>>();
 
-const extensions = baseExtensions(isMac, onEditorUpdate);
+const extensions = [
+  ...baseExtensions(isMac, onEditorUpdate),
+  // ⌘V d'une image (capture d'écran, image copiée) : enregistrée à côté des notes.
+  EditorView.domEventHandlers({
+    paste(e) {
+      const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith("image/"));
+      if (!file) return false;
+      e.preventDefault();
+      void file.arrayBuffer().then((buf) => saveImage(new Uint8Array(buf), file.type));
+      return true;
+    },
+  }),
+];
 const view = new EditorView({ parent: editorEl, state: createState("", extensions) });
 const palette = new Palette(overlayEl);
 const switcher = new Switcher(overlayEl, (id) => {
@@ -417,7 +430,7 @@ async function checkExternal() {
       const st = states.get(tab.id);
       if (tab === active) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
-        if (tab.preview) void renderPreview(previewEl, content);
+        if (tab.preview) void renderPreview(previewEl, content, noteDir(tab));
       } else if (st) {
         states.set(tab.id, st.update({ changes: { from: 0, to: st.doc.length, insert: content } }).state);
       } else {
@@ -440,7 +453,7 @@ function applyPreview(keepScroll = false) {
   appEl.classList.toggle("previewing", on);
   previewEl.hidden = !on;
   if (on) {
-    void renderPreview(previewEl, contentOf(active));
+    void renderPreview(previewEl, contentOf(active), noteDir(active));
   } else {
     previewEl.replaceChildren();
     view.requestMeasure();
@@ -574,6 +587,8 @@ interface TabDrag {
   el: HTMLElement;
   startX: number;
   grab: number;
+  /** Décalage appliqué à l'onglet glissé par rapport à sa place dans la barre. */
+  tx: number;
   moved: boolean;
   rerender?: boolean;
 }
@@ -584,7 +599,7 @@ tabsEl.addEventListener("mousedown", (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>(".pill");
   const tab = byId(el?.dataset.id);
   if (e.button !== 0 || !el || !tab || (e.target as HTMLElement).closest("[data-close]") || tabs.length < 2) return;
-  tabDrag = { tab, el, startX: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, moved: false };
+  tabDrag = { tab, el, startX: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, tx: 0, moved: false };
 });
 
 document.addEventListener("mousemove", (e) => {
@@ -597,29 +612,32 @@ document.addEventListener("mousemove", (e) => {
     tabsEl.classList.add("reordering");
     d.el.classList.add("dragging");
   }
-  // Échange avec un voisin dont le milieu est franchi par le bord de l'onglet.
+  // Positions en coordonnées de mise en page (offsetLeft) : elles ignorent les
+  // translations, donc ni l'onglet glissé ni les voisins animés ne faussent le calcul.
+  const box = tabsEl.getBoundingClientRect();
+  const w = d.el.offsetWidth;
+  const origin = d.el.getBoundingClientRect().left - d.tx - d.el.offsetLeft;
+  const left = Math.max(box.left + 3, Math.min(box.right - 3 - w, e.clientX - d.grab)) - origin;
   const pills = Array.from(tabsEl.querySelectorAll<HTMLElement>(".pill"));
   const i = pills.indexOf(d.el);
-  const left = e.clientX - d.grab;
-  const right = left + d.el.offsetWidth;
-  const center = (p: HTMLElement) => {
-    const r = p.getBoundingClientRect();
-    return r.left + r.width / 2;
-  };
+  const others = pills.filter((p) => p !== d.el);
+  const mid = (p: HTMLElement) => p.offsetLeft + p.offsetWidth / 2;
+  // L'onglet prend la place d'un voisin dès que son bord en franchit le milieu.
   let to = i;
-  while (to + 1 < pills.length && right > center(pills[to + 1])) to++;
-  while (to - 1 >= 0 && left < center(pills[to - 1])) to--;
+  if (left > d.el.offsetLeft) while (to < others.length && left + w > mid(others[to])) to++;
+  else while (to > 0 && left < mid(others[to - 1])) to--;
   if (to !== i) {
-    tabsEl.insertBefore(d.el, to > i ? pills[to].nextSibling : pills[to]);
+    const before = new Map(others.map((p) => [p, p.offsetLeft]));
+    tabsEl.insertBefore(d.el, others[to] ?? null);
     tabs = tabs.filter((t) => t !== d.tab);
     tabs.splice(to, 0, d.tab);
+    for (const p of others) {
+      const dx = before.get(p)! - p.offsetLeft;
+      if (dx) p.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: 180, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" });
+    }
   }
-  // L'onglet suit la souris, sans sortir de la barre.
-  d.el.style.transform = "";
-  const box = tabsEl.getBoundingClientRect();
-  const natural = d.el.getBoundingClientRect().left;
-  const x = Math.max(box.left + 3, Math.min(box.right - 3 - d.el.offsetWidth, left));
-  d.el.style.transform = `translateX(${x - natural}px)`;
+  d.tx = left - d.el.offsetLeft;
+  d.el.style.transform = `translateX(${d.tx}px)`;
 });
 
 document.addEventListener("mouseup", () => {
@@ -797,6 +815,8 @@ const actions: Action[] = [
   },
   { title: "Revenir à l'édition", keys: "edit editer", kbd: `${MOD}E`, icon: "draft", run: togglePreview, when: () => !!active.preview },
   { title: "Rechercher dans la note", keys: "find chercher trouver", kbd: `${MOD}F`, icon: "find", run: () => findInNote() },
+  { title: "Coller une image", keys: "paste image capture ecran presse papiers clipboard screenshot", kbd: `${MOD}V`, icon: "image", run: pasteImage },
+  { title: "Insérer une image…", keys: "image photo fichier ajouter inserer", icon: "image", run: insertImageFile },
   { title: "Changer d'onglet", keys: "switch tabs onglets", kbd: `${CTRL}Espace`, icon: "tabs", run: () => openSwitcher(1) },
   { title: "Afficher le menu", keys: "sidebar menu liste notes", kbd: `${MOD}\\`, icon: "sidebar", run: () => openSidebar(true) },
   { title: "Fermer l'onglet", keys: "close", kbd: `${MOD}W`, icon: "close", run: () => closeTab() },
@@ -884,9 +904,10 @@ function noteItems(q: string): Item[] {
     .sort((a, b) => b.m!.score - a.m!.score)
     .slice(0, 60)
     .map(({ x, m }): Item => ({ ...x.item, titleHtml: highlight(x.item.title, m!.hits) }));
+  const titles = new Set(found.map((f) => f.title));
   const name = q.trim();
   found.push({ title: `Créer « ${name} »`, sub: shortDir(), icon: "plus", run: () => createNamed(name) });
-  return found;
+  return [...found, ...textItems(q, titles)];
 }
 
 function openPalette(initial = "") {
@@ -972,6 +993,154 @@ function openSwitcher(step: number, byCtrl = false) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Recherche dans le texte de toutes les notes (⌘P), sans accents ni casse.
+// ---------------------------------------------------------------------------
+
+const textCache = new Map<string, { mtime: number; text: string; folded: string }>();
+let cacheLoading: Promise<void> | null = null;
+
+/** Lit les notes nouvelles ou modifiées depuis la dernière recherche. */
+function loadSearchCache() {
+  cacheLoading ??= (async () => {
+    const known = new Set(notes.map((n) => n.path));
+    for (const p of textCache.keys()) if (!known.has(p)) textCache.delete(p);
+    const stale = notes.filter((n) => textCache.get(n.path)?.mtime !== n.modified);
+    for (let i = 0; i < stale.length; i += 200) {
+      const batch = stale.slice(i, i + 200);
+      const res = await api.readNotes(batch.map((n) => n.path)).catch(() => []);
+      res.forEach((r, j) => {
+        if (r) textCache.set(batch[j].path, { mtime: batch[j].modified, text: r.content, folded: foldKeep(r.content) });
+      });
+    }
+    if (stale.length && palette.isOpen) palette.refresh();
+  })().finally(() => (cacheLoading = null));
+  return cacheLoading;
+}
+
+/** Extrait de la ligne trouvée, le passage mis en évidence. */
+function snippet(text: string, at: number, len: number): string {
+  const lineStart = text.lastIndexOf("\n", at - 1) + 1;
+  const lineEnd = (text.indexOf("\n", at) + 1 || text.length + 1) - 1;
+  const from = Math.max(lineStart, at - 24);
+  const to = Math.min(lineEnd, at + len + 90);
+  const before = text.slice(from, at).replace(/^\s+/, "");
+  return `${from > lineStart ? "…" : ""}${esc(before)}<mark>${esc(text.slice(at, at + len))}</mark>${esc(text.slice(at + len, to))}${to < lineEnd ? "…" : ""}`;
+}
+
+function textItems(q: string, skipTitles: Set<string>): Item[] {
+  const query = q.trim();
+  const fq = foldKeep(query);
+  if (fq.length < 2) return [];
+  const sources: { title: string; text: string; folded: string; open: () => unknown }[] = [];
+  for (const t of tabs) {
+    const text = contentOf(t);
+    sources.push({ title: titleOf(t), text, folded: foldKeep(text), open: () => activate(t) });
+  }
+  for (const n of notes) {
+    const c = textCache.get(n.path);
+    if (c && !tabs.some((t) => t.path === n.path)) sources.push({ title: n.name, ...c, open: () => openNote(n) });
+  }
+  const items: Item[] = [];
+  for (const s of sources) {
+    if (items.length >= 30) break;
+    const at = s.folded.indexOf(fq);
+    if (at < 0 || skipTitles.has(s.title)) continue;
+    let count = 0;
+    for (let i = at; i >= 0 && count < 99; i = s.folded.indexOf(fq, i + fq.length)) count++;
+    items.push({
+      title: s.title,
+      subHtml: snippet(s.text, at, fq.length),
+      meta: count > 1 ? `${count} fois` : undefined,
+      icon: "find",
+      heading: items.length ? undefined : "Dans le texte",
+      run: async () => {
+        await s.open();
+        revealMatch(fq);
+      },
+    });
+  }
+  return items;
+}
+
+/** Affiche et sélectionne la première occurrence dans la note active. */
+function revealMatch(fq: string) {
+  if (active.preview) togglePreview();
+  const at = foldKeep(view.state.doc.toString()).indexOf(fq);
+  if (at < 0) return;
+  view.dispatch({
+    selection: { anchor: at, head: at + fq.length },
+    effects: EditorView.scrollIntoView(at, { y: "center" }),
+  });
+  view.focus();
+}
+
+// ---------------------------------------------------------------------------
+// Images : ⌘V dans la note, ou ⌘K → « Coller une image » / « Insérer une image… ».
+// ---------------------------------------------------------------------------
+
+const noteDir = (tab: Tab) => (tab.path ? dirname(tab.path) : notesDir);
+
+function imageName(mime = "image/png") {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const ext = mime.split("/")[1]?.replace("jpeg", "jpg").replace("svg+xml", "svg") || "png";
+  return `image-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
+}
+
+async function saveImage(bytes: Uint8Array, mime?: string) {
+  try {
+    insertImageLink(await api.saveImage(bytes, active.path ?? "", imageName(mime)));
+  } catch (e) {
+    toast(`Impossible d'ajouter l'image : ${e}`);
+  }
+}
+
+/** Insère `![](lien)` sur sa propre ligne, à la place du curseur. */
+function insertImageLink(rel: string) {
+  const { from, to } = view.state.selection.main;
+  const doc = view.state.doc;
+  const before = from > doc.lineAt(from).from ? "\n" : "";
+  const after = to < doc.lineAt(to).to ? "\n" : "";
+  const text = `${before}![](${rel})${after}`;
+  view.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length - after.length },
+    scrollIntoView: true,
+    userEvent: "input.paste",
+  });
+  if (active.preview) void renderPreview(previewEl, contentOf(active), noteDir(active));
+}
+
+async function pasteImage() {
+  try {
+    const img = await readClipboardImage();
+    const [{ width, height }, rgba] = await Promise.all([img.size(), img.rgba()]);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+    if (!blob) throw new Error();
+    await saveImage(new Uint8Array(await blob.arrayBuffer()), "image/png");
+  } catch {
+    toast("Aucune image dans le presse-papiers");
+  }
+}
+
+async function insertImageFile() {
+  const picked = await openDialog({
+    title: "Insérer une image",
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"] }],
+  });
+  if (typeof picked !== "string") return;
+  try {
+    insertImageLink(await api.importImage(active.path ?? "", picked));
+  } catch (e) {
+    toast(`Impossible d'ajouter l'image : ${e}`);
+  }
+}
+
 function findInNote() {
   if (active.preview) togglePreview();
   requestAnimationFrame(() => openSearchPanel(view));
@@ -987,7 +1156,10 @@ function refreshNotes() {
     .listNotes()
     .then((n) => {
       notes = n;
-      if (palette.isOpen) palette.refresh();
+      if (palette.isOpen) {
+        palette.refresh();
+        void loadSearchCache();
+      }
       if (sidebarOpen) renderSidebar();
     })
     .catch(() => {})
@@ -1190,7 +1362,15 @@ function onKey(e: KeyboardEvent) {
     switcher.handleKey(e);
     return;
   }
-  if (e.type !== "keydown" || palette.isOpen) return;
+  if (palette.isOpen) {
+    // Focus perdu (clic ailleurs dans la fenêtre…) : les touches vont quand même à la palette.
+    if (e.type === "keydown" && !overlayEl.contains(e.target as Node)) {
+      palette.focus();
+      if (/^(Arrow(Up|Down)|Enter|Escape|Tab)$/.test(e.key)) palette.handleKey(e);
+    }
+    return;
+  }
+  if (e.type !== "keydown") return;
 
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const k = e.key.toLowerCase();

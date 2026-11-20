@@ -8,6 +8,10 @@ export interface Item {
   /** Titre déjà mis en forme (HTML échappé + <mark>). */
   titleHtml?: string;
   sub?: string;
+  /** Sous-titre déjà mis en forme (HTML échappé + <mark>). */
+  subHtml?: string;
+  /** Titre de section affiché au-dessus de cet élément. */
+  heading?: string;
   meta?: string;
   kbd?: string;
   icon?: string;
@@ -52,7 +56,18 @@ export class Palette {
     this.foot = this.card.querySelector(".pal-foot")!;
 
     this.input.addEventListener("input", () => this.refresh(true));
-    this.input.addEventListener("keydown", (e) => this.onKey(e));
+    this.input.addEventListener("keydown", (e) => this.handleKey(e));
+    // Le champ garde toujours le focus : un clic dans la carte ne le lui retire pas.
+    this.card.addEventListener("mousedown", (e) => {
+      if (e.target !== this.input) e.preventDefault();
+    });
+    // Un clic hors de la carte la ferme.
+    overlay.addEventListener("mousedown", (e) => {
+      if (this.isOpen && e.target === overlay) {
+        e.preventDefault();
+        this.close();
+      }
+    });
     this.list.addEventListener("mousemove", (e) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-i]");
       if (el && Number(el.dataset.i) !== this.sel) this.select(Number(el.dataset.i), false);
@@ -94,9 +109,9 @@ export class Palette {
       (heading ? `<div class="pal-heading">${esc(heading)}</div>` : "") +
       this.items
         .map(
-          (it, i) => `<div class="pal-item${i === this.sel ? " sel" : ""}${it.disabled ? " disabled" : ""}${it.active ? " current" : ""}" data-i="${it.disabled ? "" : i}" role="option">
+          (it, i) => `${it.heading ? `<div class="pal-heading">${esc(it.heading)}</div>` : ""}<div class="pal-item${i === this.sel ? " sel" : ""}${it.disabled ? " disabled" : ""}${it.active ? " current" : ""}" data-i="${it.disabled ? "" : i}" role="option">
             <span class="pal-ico">${icon(it.icon ?? "note")}</span>
-            <span class="pal-text"><span class="pal-title">${it.titleHtml ?? esc(it.title)}</span>${it.sub ? `<span class="pal-sub">${esc(it.sub)}</span>` : ""}</span>
+            <span class="pal-text"><span class="pal-title">${it.titleHtml ?? esc(it.title)}</span>${it.subHtml ? `<span class="pal-sub">${it.subHtml}</span>` : it.sub ? `<span class="pal-sub">${esc(it.sub)}</span>` : ""}</span>
             ${it.meta ? `<span class="pal-meta">${esc(it.meta)}</span>` : ""}
             ${it.kbd ? `<kbd>${esc(it.kbd)}</kbd>` : ""}
           </div>`,
@@ -145,7 +160,12 @@ export class Palette {
     void it.run();
   }
 
-  private onKey(e: KeyboardEvent) {
+  /** Remet le focus dans le champ (si une autre zone l'a pris). */
+  focus() {
+    if (document.activeElement !== this.input) this.input.focus();
+  }
+
+  handleKey(e: KeyboardEvent) {
     const mod = e.metaKey || e.ctrlKey;
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
       e.preventDefault();

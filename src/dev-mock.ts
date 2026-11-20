@@ -14,6 +14,10 @@ if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
       case "app_info": return { notes_dir: "/Users/demo/Library/Mobile Documents/com~apple~CloudDocs/Notes", platform: "macos" };
       case "list_notes": return [...files].map(([path, f]) => ({ path, name: name(path), folder: "", modified: f.mtime }));
       case "read_note": { const f = files.get(a.path); if (!f) throw "introuvable"; return f; }
+      case "read_notes": return a.paths.map((p: string) => files.get(p) ?? null);
+      case "save_image": return "images/image-demo.png";
+      case "import_image": return "images/photo.png";
+      case "read_image": return null;
       case "write_note": files.set(a.path, { content: a.content, mtime: Date.now() }); return Date.now();
       case "create_note": { const path = `/Notes/${a.name}.md`; files.set(path, { content: a.content, mtime: Date.now() }); return { path, name: a.name, mtime: Date.now() }; }
       case "rename_note": { const f = files.get(a.path)!; files.delete(a.path); const path = `/Notes/${a.name}.md`; files.set(path, f); return { path, name: a.name, mtime: f.mtime }; }

@@ -25,6 +25,7 @@ const paths: Record<string, string> = {
   power: '<path d="M12 3.5v8"/><path d="M6.6 7.2a7.5 7.5 0 1 0 10.8 0"/>',
   download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
+  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5-8.5 8.5"/>',
   tabs: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M7 7.5V4.5h10v3"/>',
   find: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="M19 19l-4.5-4.5"/><path d="M3 21h6" />',
 };

@@ -27,6 +27,28 @@ export function fuzzy(query: string, text: string): { score: number; hits: numbe
   return qi === q.length ? { score: score - s.length * 0.05, hits } : null;
 }
 
+const FOLD: Record<string, string> = {};
+/** Minuscules sans accents, même longueur que le texte : les positions trouvées
+ *  dans la version « pliée » valent pour le texte d'origine. */
+export const foldKeep = (s: string) =>
+  s
+    .replace(/\u0130/g, "I")
+    .toLowerCase()
+    .replace(/[\u00c0-\u024f\u1e00-\u1eff]/g, (c) => (FOLD[c] ??= c.normalize("NFD")[0]));
+
+/** Chemin `rel` (séparé par « / ») résolu depuis le dossier `base`. */
+export function resolvePath(base: string, rel: string): string {
+  const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
+  const parts = base.split(/[\\/]/);
+  for (const seg of rel.split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg && seg !== ".") parts.push(seg);
+  }
+  return parts.join(sep);
+}
+
+export const dirname = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
+
 export const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 

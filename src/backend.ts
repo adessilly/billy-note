@@ -9,6 +9,12 @@ export const api = {
   setNotesDir: (path: string) => invoke<string>("set_notes_dir", { path }),
   listNotes: () => invoke<NoteInfo[]>("list_notes"),
   readNote: (path: string) => invoke<{ content: string; mtime: number }>("read_note", { path }),
+  readNotes: (paths: string[]) => invoke<({ content: string; mtime: number } | null)[]>("read_notes", { paths }),
+  /** Enregistre une image dans « images/ » ; renvoie le lien relatif à la note. */
+  saveImage: (bytes: Uint8Array, note: string, name: string) =>
+    invoke<string>("save_image", bytes, { headers: { "x-note": encodeURIComponent(note), "x-name": encodeURIComponent(name) } }),
+  importImage: (note: string, source: string) => invoke<string>("import_image", { note, source }),
+  readImage: (path: string) => invoke<ArrayBuffer>("read_image", { path }),
   writeNote: (path: string, content: string) => invoke<number>("write_note", { path, content }),
   createNote: (name: string, content: string) => invoke<Created>("create_note", { name, content }),
   renameNote: (path: string, name: string) => invoke<Created>("rename_note", { path, name }),

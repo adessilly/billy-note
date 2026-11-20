@@ -231,12 +231,135 @@ struct NoteContent {
 #[tauri::command]
 fn read_note(app: AppHandle, path: String) -> Res<NoteContent> {
     let p = ensure_inside(&app, Path::new(&path))?;
-    let bytes = fs::read(&p).map_err(err)?;
+    read_text(&p)
+}
+
+fn read_text(p: &Path) -> Res<NoteContent> {
+    let bytes = fs::read(p).map_err(err)?;
     let content = String::from_utf8(bytes)
         .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     // Retire un éventuel BOM UTF-8 (fichiers créés par le Bloc-notes Windows).
     let content = content.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(content);
-    Ok(NoteContent { content, mtime: mtime(&p).unwrap_or(0.0) })
+    Ok(NoteContent { content, mtime: mtime(p).unwrap_or(0.0) })
+}
+
+/// Contenu de plusieurs notes d'un coup, pour la recherche dans le texte.
+/// Les fichiers illisibles ou trop gros (> 2 Mo) donnent `null`.
+#[tauri::command]
+fn read_notes(app: AppHandle, paths: Vec<String>) -> Vec<Option<NoteContent>> {
+    paths
+        .iter()
+        .map(|path| {
+            let p = ensure_inside(&app, Path::new(path)).ok()?;
+            if fs::metadata(&p).ok()?.len() > 2_000_000 {
+                return None;
+            }
+            read_text(&p).ok()
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Images : enregistrées dans le sous-dossier « images » du dossier des notes,
+// et référencées par un chemin relatif à la note (Markdown standard).
+// ---------------------------------------------------------------------------
+
+const IMAGE_EXTS: [&str; 7] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
+
+fn image_ext(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    IMAGE_EXTS.contains(&ext.as_str()).then_some(ext)
+}
+
+/// Emplacement libre dans « images/ » et lien relatif à la note `note`.
+fn image_target(app: &AppHandle, note: &str, file_name: &str) -> Res<(PathBuf, String)> {
+    let root = notes_dir(app)?;
+    let dir = root.join("images");
+    fs::create_dir_all(&dir).map_err(err)?;
+    let root = root.canonicalize().unwrap_or(root);
+
+    let p = Path::new(file_name);
+    let ext = image_ext(p).unwrap_or_else(|| "png".into());
+    // Nom sans espaces ni parenthèses : le lien Markdown reste valide tel quel.
+    let stem: String = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .take(80)
+        .collect();
+    let stem = if stem.trim_matches('-').is_empty() { "image".to_string() } else { stem };
+    let mut target = dir.join(format!("{stem}.{ext}"));
+    let mut i = 2;
+    while target.exists() {
+        target = dir.join(format!("{stem}-{i}.{ext}"));
+        i += 1;
+    }
+
+    let depth = (!note.is_empty())
+        .then(|| ensure_inside(app, Path::new(note)).ok())
+        .flatten()
+        .and_then(|p| p.parent().and_then(|d| d.strip_prefix(&root).ok()).map(|r| r.components().count()))
+        .unwrap_or(0);
+    let name = target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    Ok((target, format!("{}images/{name}", "../".repeat(depth))))
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Image collée : octets bruts dans le corps de la requête, note et nom de
+/// fichier dans les en-têtes `x-note` / `x-name` (encodés en URI).
+#[tauri::command]
+fn save_image(app: AppHandle, request: tauri::ipc::Request<'_>) -> Res<String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("image invalide".into());
+    };
+    let header = |k: &str| {
+        request.headers().get(k).and_then(|v| v.to_str().ok()).map(percent_decode).unwrap_or_default()
+    };
+    let (target, rel) = image_target(&app, &header("x-note"), &header("x-name"))?;
+    write_atomic(&target, data)?;
+    Ok(rel)
+}
+
+/// Image choisie sur le disque : copiée dans « images/ ».
+#[tauri::command]
+fn import_image(app: AppHandle, note: String, source: String) -> Res<String> {
+    let src = Path::new(&source);
+    if image_ext(src).is_none() {
+        return Err("ce fichier n'est pas une image".into());
+    }
+    let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let (target, rel) = image_target(&app, &note, &name)?;
+    fs::copy(src, &target).map_err(err)?;
+    Ok(rel)
+}
+
+/// Octets d'une image du dossier des notes, pour l'afficher en consultation.
+#[tauri::command]
+fn read_image(app: AppHandle, path: String) -> Res<tauri::ipc::Response> {
+    let p = ensure_inside(&app, Path::new(&path))?;
+    if image_ext(&p).is_none() {
+        return Err("ce fichier n'est pas une image".into());
+    }
+    Ok(tauri::ipc::Response::new(fs::read(&p).map_err(err)?))
 }
 
 #[tauri::command]
@@ -385,6 +508,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 // La fenêtre est affichée par le front une fois le thème appliqué.
@@ -396,6 +520,10 @@ pub fn run() {
             set_notes_dir,
             list_notes,
             read_note,
+            read_notes,
+            save_image,
+            import_image,
+            read_image,
             write_note,
             create_note,
             rename_note,

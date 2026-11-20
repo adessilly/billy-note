@@ -23,7 +23,7 @@ Ensuite, l'application se met à jour toute seule (voir [Mises à jour automatiq
 
 | Action | Raccourci |
 |---|---|
-| Rechercher / ouvrir une note | ⌘P |
+| Rechercher une note (titre et texte) / l'ouvrir | ⌘P |
 | Actions (thème, dossier, renommer…) | ⌘K, ou ⌘P puis `/` |
 | Changer d'onglet (maintenir Ctrl) | Ctrl+Espace ou Ctrl+Tab |
 | Onglet 1 à 9 | ⌘1…⌘9 |
@@ -33,11 +33,16 @@ Ensuite, l'application se met à jour toute seule (voir [Mises à jour automatiq
 | Rechercher dans la note | ⌘F |
 | Menu des notes | ⌘\ ou survol du bord gauche |
 | Fermer l'onglet | ⌘W |
+| Coller une image | ⌘V (ou ⌘K → « Coller une image ») |
 | Taille du texte | ⌘+ ⌘− ⌘0 |
 
-Les onglets apparaissent en faisant défiler vers le haut ou en survolant le haut de la fenêtre.
+Les onglets apparaissent en faisant défiler vers le haut ou en survolant le haut de la fenêtre ; on les réordonne en les faisant glisser.
 Pour déplacer la fenêtre : glisser depuis une marge autour du texte (haut, côtés ou sous la dernière ligne).
 En vue consultation, les cases `- [ ]` se cochent d'un clic (ou Espace) et la note est mise à jour.
+
+⌘P cherche aussi dans le texte de toutes les notes (sans tenir compte des accents ni des majuscules) : les résultats apparaissent sous « Dans le texte », et en choisir un ouvre la note sur le passage trouvé.
+
+Les images collées ou insérées (⌘K → « Insérer une image… ») sont enregistrées dans le sous-dossier `images/` du dossier des notes et référencées en Markdown standard (`![](images/…png)`) : elles se synchronisent avec les notes et restent lisibles dans n'importe quel autre éditeur.
 
 ## Notes et brouillons
 

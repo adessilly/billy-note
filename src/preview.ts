@@ -7,6 +7,8 @@ import { highlightCode } from "@lezer/highlight";
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { highlightStyle } from "./editor";
+import { api } from "./backend";
+import { resolvePath } from "./util";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -34,13 +36,55 @@ function enableTasks(root: HTMLElement) {
   });
 }
 
-export async function renderPreview(el: HTMLElement, source: string): Promise<void> {
+const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" };
+const imageUrls = new Map<string, Promise<string | null>>();
+
+/** URL affichable d'une image du dossier des notes (lue par le backend, mise en cache). */
+function imageUrl(path: string): Promise<string | null> {
+  let url = imageUrls.get(path);
+  if (!url) {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    url = api
+      .readImage(path)
+      .then((buf) => (buf ? URL.createObjectURL(new Blob([buf], { type: MIME[ext] ?? "image/png" })) : null))
+      .catch(() => null);
+    imageUrls.set(path, url);
+    // Une image absente pourra être retrouvée plus tard (synchro en cours…).
+    void url.then((u) => u || imageUrls.delete(path));
+  }
+  return url;
+}
+
+/** Images à chemin relatif (« images/… ») : résolues depuis le dossier de la note. */
+function loadImages(root: ParentNode, baseDir: string) {
+  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img"))) {
+    const src = img.getAttribute("src") ?? "";
+    if (!src || /^([a-z][a-z0-9+.-]*:|\/|\\)/i.test(src)) continue;
+    let rel = src;
+    try {
+      rel = decodeURIComponent(src);
+    } catch {
+      /* chemin non encodé */
+    }
+    img.removeAttribute("src");
+    void imageUrl(resolvePath(baseDir, rel)).then((url) => {
+      if (url) img.src = url;
+      else img.classList.add("missing");
+    });
+  }
+}
+
+export async function renderPreview(el: HTMLElement, source: string, baseDir = ""): Promise<void> {
   const token = ++renderToken;
   const html = DOMPurify.sanitize(await marked.parse(source), { ADD_ATTR: ["target"] });
   if (token !== renderToken) return;
   const body = document.createElement("div");
   body.className = "prose";
-  body.innerHTML = html || `<p class="empty">Note vide</p>`;
+  // Gabarit inerte : les images relatives ne sont pas chargées avant d'être résolues.
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html || `<p class="empty">Note vide</p>`;
+  if (baseDir) loadImages(tpl.content, baseDir);
+  body.append(tpl.content);
   el.replaceChildren(body);
   enableTasks(body);
 
