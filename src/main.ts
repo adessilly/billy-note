@@ -533,6 +533,7 @@ let tabsTimer: ReturnType<typeof setTimeout> | undefined;
 let tabsHover = false;
 
 function renderTabs() {
+  if (tabDrag) return void (tabDrag.rerender = true);
   tabsEl.innerHTML = tabs
     .map((t) => {
       const draft = t.kind === "draft" && contentOf(t).trim() !== "";
@@ -550,7 +551,7 @@ function showTabs(ms = 1600) {
   topbarEl.classList.add("show");
   clearTimeout(tabsTimer);
   tabsTimer = setTimeout(function hide() {
-    if (tabsHover) tabsTimer = setTimeout(hide, 600);
+    if (tabsHover || tabDrag) tabsTimer = setTimeout(hide, 600);
     else topbarEl.classList.remove("show");
   }, ms);
 }
@@ -566,7 +567,78 @@ for (const el of topbarEl.querySelectorAll<HTMLElement>("#tabs, .tb-btn")) {
 topbarEl.addEventListener("mousedown", (e) => {
   if ((e.target as HTMLElement).closest("#tabs, .tb-btn")) e.preventDefault();
 });
+// Glisser un onglet pour le déplacer : il suit la souris, et l'ordre change dès
+// qu'il dépasse le milieu d'un voisin.
+interface TabDrag {
+  tab: Tab;
+  el: HTMLElement;
+  startX: number;
+  grab: number;
+  moved: boolean;
+  rerender?: boolean;
+}
+let tabDrag: TabDrag | null = null;
+let suppressTabClick = false;
+
+tabsEl.addEventListener("mousedown", (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>(".pill");
+  const tab = byId(el?.dataset.id);
+  if (e.button !== 0 || !el || !tab || (e.target as HTMLElement).closest("[data-close]") || tabs.length < 2) return;
+  tabDrag = { tab, el, startX: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, moved: false };
+});
+
+document.addEventListener("mousemove", (e) => {
+  const d = tabDrag;
+  if (!d) return;
+  if (!d.moved) {
+    if (Math.abs(e.clientX - d.startX) < 5) return;
+    d.moved = true;
+    tabsHover = true;
+    tabsEl.classList.add("reordering");
+    d.el.classList.add("dragging");
+  }
+  // Échange avec un voisin dont le milieu est franchi par le bord de l'onglet.
+  const pills = Array.from(tabsEl.querySelectorAll<HTMLElement>(".pill"));
+  const i = pills.indexOf(d.el);
+  const left = e.clientX - d.grab;
+  const right = left + d.el.offsetWidth;
+  const center = (p: HTMLElement) => {
+    const r = p.getBoundingClientRect();
+    return r.left + r.width / 2;
+  };
+  let to = i;
+  while (to + 1 < pills.length && right > center(pills[to + 1])) to++;
+  while (to - 1 >= 0 && left < center(pills[to - 1])) to--;
+  if (to !== i) {
+    tabsEl.insertBefore(d.el, to > i ? pills[to].nextSibling : pills[to]);
+    tabs = tabs.filter((t) => t !== d.tab);
+    tabs.splice(to, 0, d.tab);
+  }
+  // L'onglet suit la souris, sans sortir de la barre.
+  d.el.style.transform = "";
+  const box = tabsEl.getBoundingClientRect();
+  const natural = d.el.getBoundingClientRect().left;
+  const x = Math.max(box.left + 3, Math.min(box.right - 3 - d.el.offsetWidth, left));
+  d.el.style.transform = `translateX(${x - natural}px)`;
+});
+
+document.addEventListener("mouseup", () => {
+  const d = tabDrag;
+  if (!d) return;
+  tabDrag = null;
+  if (!d.moved) return;
+  suppressTabClick = true;
+  setTimeout(() => (suppressTabClick = false));
+  tabsEl.classList.remove("reordering");
+  tabsHover = false;
+  renderTabs();
+  if (sidebarOpen) renderSidebar();
+  saveSessionSoon();
+  showTabs(900);
+});
+
 tabsEl.addEventListener("click", (e) => {
+  if (suppressTabClick) return;
   const el = e.target as HTMLElement;
   const close = el.closest<HTMLElement>("[data-close]")?.dataset.close;
   if (close) {

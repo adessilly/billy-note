@@ -295,6 +295,9 @@ html, body {
 .pill-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill:hover { background: var(--hover); color: var(--fg); }
 .pill.on { background: var(--selected); color: var(--fg); font-weight: 500; }
+/* Onglet en cours de déplacement : au-dessus des autres, sans effet de survol ailleurs. */
+.pill.dragging { z-index: 1; background: var(--panel-solid); color: var(--fg); box-shadow: var(--shadow); }
+#tabs.reordering .pill:not(.dragging) { pointer-events: none; }
 
 /* Emplacement de droite : la croix (au survol, et toujours sur l'onglet actif)
    ou le point bleu d'un brouillon non enregistré, qui devient croix au survol. */
