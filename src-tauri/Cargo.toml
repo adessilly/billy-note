@@ -2,6 +2,7 @@
 name = "billy-note"
 version = "0.1.0"
 description = "Bloc-notes minimaliste Markdown"
+license = "MIT"
 edition = "2021"
 
 [lib]

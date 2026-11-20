@@ -60,3 +60,7 @@ Résultat : `src-tauri\target\release\billy-note.exe` (portable) et l'installate
 La compilation Windows depuis un Mac n'est pas prise en charge de façon fiable : utiliser un PC Windows ou GitHub Actions.
 
 Les applications ne sont pas signées : sur un autre Mac, il faut faire clic droit → Ouvrir la première fois ; sur Windows, SmartScreen affiche « Informations complémentaires → Exécuter quand même ».
+
+## Licence
+
+[MIT](LICENSE)
