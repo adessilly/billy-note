@@ -20,7 +20,8 @@ Tauri 2 (Rust) + CodeMirror 6. Environ 4 Mo.
 | Taille du texte | ⌘+ ⌘− ⌘0 |
 
 Les onglets apparaissent en faisant défiler vers le haut ou en survolant le haut de la fenêtre.
-Pour déplacer la fenêtre : glisser depuis le bord du haut.
+Pour déplacer la fenêtre : glisser depuis une marge autour du texte (haut, côtés ou sous la dernière ligne).
+En vue consultation, les cases `- [ ]` se cochent d'un clic (ou Espace) et la note est mise à jour.
 
 ## Notes et brouillons
 

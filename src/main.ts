@@ -6,6 +6,7 @@ import "./dev-mock";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { openSearchPanel } from "@codemirror/search";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -853,7 +854,7 @@ function showShortcuts() {
     ["Menu des notes", `${MOD}\\  ou bord gauche`],
     ["Fermer l'onglet", `${MOD}W`],
     ["Taille du texte", `${MOD}+  ${MOD}−  ${MOD}0`],
-    ["Déplacer la fenêtre", "glisser le bord du haut"],
+    ["Déplacer la fenêtre", "glisser une marge ou le bord du haut"],
   ];
   palette.open({
     label: "Raccourcis clavier",
@@ -960,17 +961,79 @@ document.addEventListener(
 
 document.addEventListener("mousemove", (e) => {
   appEl.classList.toggle("near-bar", e.clientX > window.innerWidth - 18);
+  if (e.buttons === 0) appEl.classList.toggle("in-margin", inMargin(e));
   if (e.clientY < 44 && !sidebarOpen) showTabs(900);
 });
 
 previewEl.tabIndex = -1;
-previewEl.addEventListener("dblclick", () => togglePreview());
+previewEl.addEventListener("dblclick", (e) => {
+  if (!(e.target as HTMLElement).closest("input")) togglePreview();
+});
 previewEl.addEventListener("click", (e) => {
   const a = (e.target as HTMLElement).closest("a");
   if (!a) return;
   e.preventDefault();
   const href = a.getAttribute("href") ?? "";
   if (/^(https?:|mailto:)/i.test(href)) void openUrl(href);
+});
+
+// Cases à cocher de la vue consultation : modifient le « [ ] » de la source.
+// La n-ième case rendue correspond au n-ième marqueur de tâche de l'arbre
+// syntaxique ; si les deux analyseurs ne sont pas d'accord, on ne touche à rien.
+function taskMarkers(state: EditorState) {
+  const tree = ensureSyntaxTree(state, state.doc.length, 400) ?? syntaxTree(state);
+  const out: { from: number; to: number }[] = [];
+  tree.iterate({ enter: (n) => void (n.name === "TaskMarker" && out.push({ from: n.from, to: n.to })) });
+  return out;
+}
+
+previewEl.addEventListener("change", (e) => {
+  const box = e.target as HTMLInputElement;
+  if (box.dataset.task === undefined) return;
+  const marks = taskMarkers(view.state);
+  const m = marks[Number(box.dataset.task)];
+  if (!m || marks.length !== previewEl.querySelectorAll("input[data-task]").length) {
+    box.checked = !box.checked;
+    toast(`Cette case ne peut pas être cochée ici : passez en édition (${MOD}E)`);
+    return;
+  }
+  view.dispatch({ changes: { from: m.from + 1, to: m.to - 1, insert: box.checked ? "x" : " " }, userEvent: "input.toggle" });
+});
+
+// ---------------------------------------------------------------------------
+// Déplacer la fenêtre depuis les marges autour du texte (et le bord du haut).
+// ---------------------------------------------------------------------------
+
+/** Le pointeur est-il dans les marges, hors de la colonne de texte ? */
+function inMargin(e: MouseEvent): boolean {
+  if (!active) return false;
+  const scroller = active.preview ? previewEl : view.scrollDOM;
+  const col = active.preview ? previewEl.querySelector<HTMLElement>(".prose") : view.contentDOM;
+  if (!col || !scroller.contains(e.target as Node)) return false;
+  const box = scroller.getBoundingClientRect();
+  if (e.clientX >= box.left + scroller.clientWidth) return false; // barre de défilement
+  const r = col.getBoundingClientRect();
+  const cs = getComputedStyle(col);
+  // Un peu de tolérance autour du texte pour garder le clic « début de ligne ».
+  return (
+    e.clientX < r.left + parseFloat(cs.paddingLeft) - 16 ||
+    e.clientX > r.right - parseFloat(cs.paddingRight) + 16 ||
+    e.clientY < r.top + parseFloat(cs.paddingTop) - 16 ||
+    e.clientY > r.bottom - parseFloat(cs.paddingBottom) + 40
+  );
+}
+
+function onMarginDown(e: MouseEvent) {
+  if (e.button !== 0 || !inMargin(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  // Le double-clic reste disponible (retour à l'édition depuis la consultation).
+  if (e.detail === 1) void getCurrentWindow().startDragging();
+}
+editorEl.addEventListener("mousedown", onMarginDown, true);
+previewEl.addEventListener("mousedown", onMarginDown, true);
+edgeEl.addEventListener("mousedown", (e) => {
+  if (e.button === 0 && e.detail === 1) void getCurrentWindow().startDragging();
 });
 
 // ---------------------------------------------------------------------------
