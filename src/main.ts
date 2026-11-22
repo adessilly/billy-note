@@ -5,7 +5,6 @@
 import "./dev-mock";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { openSearchPanel } from "@codemirror/search";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
@@ -16,7 +15,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { readImage as readClipboardImage } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, type NoteInfo } from "./backend";
-import { baseExtensions, createState } from "./editor";
+import { baseExtensions, closeFind, createState, findQuery, toggleFind } from "./editor";
 import { renderPreview } from "./preview";
 import { Palette, Switcher, type Item, type Source } from "./palette";
 import { icon } from "./icons";
@@ -81,7 +80,7 @@ const writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const writeChains = new Map<string, Promise<void>>();
 
 const extensions = [
-  ...baseExtensions(isMac, onEditorUpdate),
+  ...baseExtensions(isMac, onEditorUpdate, (q) => openSearch(q)),
   // ⌘V d'une image (capture d'écran, image copiée) : enregistrée à côté des notes.
   EditorView.domEventHandlers({
     paste(e) {
@@ -815,6 +814,13 @@ const actions: Action[] = [
   },
   { title: "Revenir à l'édition", keys: "edit editer", kbd: `${MOD}E`, icon: "draft", run: togglePreview, when: () => !!active.preview },
   { title: "Rechercher dans la note", keys: "find chercher trouver", kbd: `${MOD}F`, icon: "find", run: () => findInNote() },
+  {
+    title: "Rechercher dans toutes les notes",
+    keys: "find search grep global chercher trouver texte contenu",
+    kbd: `${MOD}⇧F`,
+    icon: "notes",
+    run: () => openSearch(),
+  },
   { title: "Coller une image", keys: "paste image capture ecran presse papiers clipboard screenshot", kbd: `${MOD}V`, icon: "image", run: pasteImage },
   { title: "Insérer une image…", keys: "image photo fichier ajouter inserer", icon: "image", run: insertImageFile },
   { title: "Changer d'onglet", keys: "switch tabs onglets", kbd: `${CTRL}Espace`, icon: "tabs", run: () => openSwitcher(1) },
@@ -858,7 +864,7 @@ const actions: Action[] = [
 const searchFooter = (q: string) =>
   q.startsWith("/")
     ? `<span><kbd>↵</kbd> exécuter</span><span><kbd>⇥</kbd> compléter</span><span><kbd>⌫</kbd> notes</span><span><kbd>esc</kbd> fermer</span><span class="pal-ver">Billy Note ${esc(appVersion)}</span>`
-    : `<span><kbd>↑↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>/</kbd> actions</span><span><kbd>esc</kbd> fermer</span>`;
+    : `<span><kbd>↑↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>/</kbd> actions</span><span><kbd>${MOD}⇧F</kbd> dans le texte</span><span><kbd>esc</kbd> fermer</span>`;
 
 function actionItems(q: string): Item[] {
   return actions
@@ -907,12 +913,22 @@ function noteItems(q: string): Item[] {
   const titles = new Set(found.map((f) => f.title));
   const name = q.trim();
   found.push({ title: `Créer « ${name} »`, sub: shortDir(), icon: "plus", run: () => createNamed(name) });
-  return [...found, ...textItems(q, titles)];
+  const inText = textItems(q, titles);
+  if (inText.length)
+    inText.push({
+      title: `Tous les résultats pour « ${name} »`,
+      icon: "notes",
+      kbd: `${MOD}⇧F`,
+      keepOpen: true,
+      run: () => openSearch(name),
+    });
+  return [...found, ...inText];
 }
 
 function openPalette(initial = "") {
   closeSidebar();
   palette.open({
+    mode: "notes",
     placeholder: "Rechercher une note…   / pour les actions",
     initial,
     items: (q) => (q.startsWith("/") ? actionItems(q.slice(1)) : noteItems(q)),
@@ -962,7 +978,8 @@ function showShortcuts() {
     ["Nouvelle note", `${MOD}N`],
     ["Enregistrer / nommer", `${MOD}S`],
     ["Vue consultation", `${MOD}E`],
-    ["Rechercher dans la note", `${MOD}F`],
+    ["Rechercher dans la note", `${MOD}F  (à nouveau pour fermer)`],
+    ["Rechercher dans toutes les notes", `${MOD}⇧F`],
     ["Menu des notes", `${MOD}\\  ou bord gauche`],
     ["Fermer l'onglet", `${MOD}W`],
     ["Taille du texte", `${MOD}+  ${MOD}−  ${MOD}0`],
@@ -1043,7 +1060,7 @@ function textItems(q: string, skipTitles: Set<string>): Item[] {
   }
   const items: Item[] = [];
   for (const s of sources) {
-    if (items.length >= 30) break;
+    if (items.length >= 5) break;
     const at = s.folded.indexOf(fq);
     if (at < 0 || skipTitles.has(s.title)) continue;
     let count = 0;
@@ -1056,17 +1073,19 @@ function textItems(q: string, skipTitles: Set<string>): Item[] {
       heading: items.length ? undefined : "Dans le texte",
       run: async () => {
         await s.open();
-        revealMatch(fq);
+        revealMatch(fq, at);
       },
     });
   }
   return items;
 }
 
-/** Affiche et sélectionne la première occurrence dans la note active. */
-function revealMatch(fq: string) {
+/** Affiche et sélectionne l'occurrence trouvée en `near` (ou la plus proche). */
+function revealMatch(fq: string, near = 0) {
   if (active.preview) togglePreview();
-  const at = foldKeep(view.state.doc.toString()).indexOf(fq);
+  const folded = foldKeep(view.state.doc.toString());
+  let at = folded.startsWith(fq, near) ? near : folded.indexOf(fq, near);
+  if (at < 0) at = folded.lastIndexOf(fq, near);
   if (at < 0) return;
   view.dispatch({
     selection: { anchor: at, head: at + fq.length },
@@ -1074,6 +1093,152 @@ function revealMatch(fq: string) {
   });
   view.focus();
 }
+
+// ---------------------------------------------------------------------------
+// Recherche dans toutes les notes (⌘⇧F) : résultats groupés par note, une
+// ligne par passage trouvé.
+// ---------------------------------------------------------------------------
+
+/** Lignes affichées par note avant « afficher plus ». */
+const HITS_PER_NOTE = 4;
+const MAX_ROWS = 300;
+const expanded = new Set<string>();
+let expandedFor = "";
+let searchStats = { lines: 0, notes: 0 };
+
+interface SearchSource {
+  key: string;
+  title: string;
+  sub: string;
+  icon: string;
+  text: string;
+  folded: string;
+  open: () => unknown;
+}
+
+function searchSources(): SearchSource[] {
+  const ordered = [active, ...mru.map(byId).filter((t): t is Tab => !!t && t !== active), ...tabs.filter((t) => t !== active && !mru.includes(t.id))];
+  const out: SearchSource[] = [];
+  for (const t of ordered) {
+    const text = contentOf(t);
+    out.push({
+      key: t.path ?? t.id,
+      title: titleOf(t),
+      sub: t.kind === "draft" ? "brouillon" : notes.find((n) => n.path === t.path)?.folder || "",
+      icon: t.kind === "draft" ? "draft" : "note",
+      text,
+      folded: foldKeep(text),
+      open: () => activate(t),
+    });
+  }
+  for (const n of notes) {
+    const c = textCache.get(n.path);
+    if (c && !tabs.some((t) => t.path === n.path))
+      out.push({ key: n.path, title: n.name, sub: n.folder, icon: "note", text: c.text, folded: c.folded, open: () => openNote(n) });
+  }
+  return out;
+}
+
+/** Ligne trouvée, tous les passages mis en évidence, recentrée sur le premier. */
+function lineSnippet(text: string, start: number, end: number, hits: number[], len: number): string {
+  const from = Math.max(start, hits[0] - 36);
+  let lead = from;
+  while (lead < hits[0] && /\s/.test(text[lead])) lead++;
+  let out = from > start && lead === from ? "…" : "";
+  let i = lead;
+  for (const h of hits) {
+    if (h < i) continue;
+    out += esc(text.slice(i, h)) + `<mark>${esc(text.slice(h, h + len))}</mark>`;
+    i = h + len;
+  }
+  return out + esc(text.slice(i, Math.min(end, i + 160)));
+}
+
+function searchItems(q: string): Item[] {
+  const query = q.trim();
+  const fq = foldKeep(query);
+  if (query !== expandedFor) expanded.clear(), (expandedFor = query);
+  searchStats = { lines: 0, notes: 0 };
+  if (fq.length < 2) {
+    const n = notes.length + tabs.filter((t) => t.kind === "draft").length;
+    return [{ title: `Tapez au moins deux lettres pour chercher dans ${n} note${n > 1 ? "s" : ""}`, icon: "notes", disabled: true }];
+  }
+  const items: Item[] = [];
+  for (const s of searchSources()) {
+    // Passages groupés par ligne.
+    const lines: { n: number; start: number; end: number; hits: number[] }[] = [];
+    let lineNo = 1, scanned = 0;
+    for (let at = s.folded.indexOf(fq); at >= 0 && lines.length < 500; at = s.folded.indexOf(fq, at + fq.length)) {
+      for (let nl = s.text.indexOf("\n", scanned); nl >= 0 && nl < at; nl = s.text.indexOf("\n", nl + 1)) lineNo++, (scanned = nl + 1);
+      const last = lines[lines.length - 1];
+      if (last?.n === lineNo) last.hits.push(at);
+      else {
+        const end = s.text.indexOf("\n", at);
+        lines.push({ n: lineNo, start: scanned, end: end < 0 ? s.text.length : end, hits: [at] });
+      }
+    }
+    if (!lines.length) continue;
+    const total = lines.reduce((a, l) => a + l.hits.length, 0);
+    searchStats.notes++;
+    searchStats.lines += total;
+    if (items.length >= MAX_ROWS) continue;
+    const limit = expanded.has(s.key) ? 200 : HITS_PER_NOTE;
+    lines.slice(0, limit).forEach((l, i) =>
+      items.push({
+        title: s.text.slice(l.start, l.end),
+        titleHtml: lineSnippet(s.text, l.start, l.end, l.hits, fq.length),
+        line: l.n,
+        meta: l.hits.length > 1 ? `×${l.hits.length}` : undefined,
+        group: i ? undefined : { title: s.title, sub: s.sub, meta: String(total), icon: s.icon },
+        run: async () => {
+          await s.open();
+          revealMatch(fq, l.hits[0]);
+        },
+      }),
+    );
+    if (lines.length > limit) {
+      const more = lines.length - limit;
+      items.push({
+        title: `${more} autre${more > 1 ? "s" : ""} ligne${more > 1 ? "s" : ""}`,
+        icon: "down",
+        keepOpen: true,
+        run: () => {
+          expanded.add(s.key);
+          palette.refresh();
+        },
+      });
+    }
+  }
+  if (!items.length)
+    items.push({ title: cacheLoading ? "Lecture des notes…" : `Aucun résultat pour « ${query} »`, icon: "find", disabled: true });
+  return items;
+}
+
+const plural = (n: number, w: string) => `${n} ${w}${n > 1 ? "s" : ""}`;
+
+function openSearch(initial = "") {
+  closeSidebar();
+  if (searchPanelOpenIn()) closeFind(view);
+  palette.open({
+    mode: "search",
+    wide: true,
+    icon: "notes",
+    placeholder: "Rechercher dans toutes les notes…",
+    initial,
+    selectInitial: true,
+    items: searchItems,
+    footer: () =>
+      `<span><kbd>↑↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>${MOD}P</kbd> titres</span><span><kbd>esc</kbd> fermer</span>` +
+      (searchStats.notes
+        ? `<span class="pal-ver">${plural(searchStats.lines, "résultat")} · ${plural(searchStats.notes, "note")}</span>`
+        : cacheLoading
+          ? `<span class="pal-ver">lecture des notes…</span>`
+          : ""),
+  });
+  refreshNotes();
+}
+
+const searchPanelOpenIn = () => !!view.dom.querySelector(".find");
 
 // ---------------------------------------------------------------------------
 // Images : ⌘V dans la note, ou ⌘K → « Coller une image » / « Insérer une image… ».
@@ -1143,7 +1308,7 @@ async function insertImageFile() {
 
 function findInNote() {
   if (active.preview) togglePreview();
-  requestAnimationFrame(() => openSearchPanel(view));
+  requestAnimationFrame(() => toggleFind(view));
 }
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1527,26 @@ function onKey(e: KeyboardEvent) {
     switcher.handleKey(e);
     return;
   }
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  const k = e.key.toLowerCase();
+  const done = () => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  if (palette.isOpen && e.type === "keydown" && mod && !e.altKey) {
+    // Le raccourci qui a ouvert la palette la referme ; un autre change de mode
+    // en gardant la recherche.
+    const want = k === "f" && e.shiftKey ? "search" : k === "k" || (k === "p" && e.shiftKey) ? "actions" : k === "p" ? "notes" : null;
+    if (want) {
+      done();
+      const q = palette.query;
+      const now = palette.mode === "notes" && q.startsWith("/") ? "actions" : palette.mode;
+      if (want === now) return palette.close();
+      const carry = now === "actions" || !palette.mode ? "" : q;
+      return want === "search" ? openSearch(carry) : openPalette(want === "actions" ? "/" : carry);
+    }
+  }
   if (palette.isOpen) {
     // Focus perdu (clic ailleurs dans la fenêtre…) : les touches vont quand même à la palette.
     if (e.type === "keydown" && !overlayEl.contains(e.target as Node)) {
@@ -1372,13 +1557,6 @@ function onKey(e: KeyboardEvent) {
   }
   if (e.type !== "keydown") return;
 
-  const mod = isMac ? e.metaKey : e.ctrlKey;
-  const k = e.key.toLowerCase();
-  const done = () => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
   // ⌃Espace / Ctrl+Tab : sélecteur d'onglets (maintenir Ctrl).
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "Space" || e.key === "Tab")) {
     done();
@@ -1386,6 +1564,7 @@ function onKey(e: KeyboardEvent) {
   }
 
   if (mod && !e.altKey) {
+    if (k === "f" && e.shiftKey) return done(), openSearch(findQuery(view) || selectedWord());
     if (k === "p") return done(), openPalette(e.shiftKey ? "/" : "");
     if (k === "k") return done(), openPalette("/");
     if (k === "n" || k === "t") return done(), newDraft();
@@ -1412,6 +1591,13 @@ function onKey(e: KeyboardEvent) {
     if (sidebarOpen) return done(), closeSidebar();
     if (active.preview) return done(), togglePreview();
   }
+}
+/** Texte sélectionné sur une seule ligne, pour préremplir la recherche. */
+function selectedWord() {
+  if (active.preview) return "";
+  const { from, to } = view.state.selection.main;
+  const t = view.state.sliceDoc(from, to);
+  return t.length < 80 && !t.includes("\n") ? t : "";
 }
 window.addEventListener("keydown", onKey, true);
 window.addEventListener("keyup", onKey, true);

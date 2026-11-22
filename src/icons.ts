@@ -27,6 +27,9 @@ const paths: Record<string, string> = {
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5-8.5 8.5"/>',
   tabs: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M7 7.5V4.5h10v3"/>',
+  up: '<path d="M6.5 14.5L12 9l5.5 5.5"/>',
+  down: '<path d="M6.5 9.5L12 15l5.5-5.5"/>',
+  notes: '<path d="M8 6.5V3.5h7l4 4v11h-3"/><path d="M5 6.5h7l4 4v10H5z"/>',
   find: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="M19 19l-4.5-4.5"/><path d="M3 21h6" />',
 };
 

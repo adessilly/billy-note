@@ -26,12 +26,17 @@ import {
   findPrevious,
   getSearchQuery,
   highlightSelectionMatches,
+  openSearchPanel,
   search,
   searchKeymap,
+  searchPanelOpen,
   SearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
+import { icon } from "./icons";
+
+const MODK = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
 
 export const highlightStyle = HighlightStyle.define([
   // Markdown
@@ -123,51 +128,113 @@ const blockDecorations = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
-/** Recherche minimaliste : un seul champ flottant, sans boutons. */
-function searchPanel(view: EditorView): Panel {
-  const dom = document.createElement("div");
-  dom.className = "find";
-  const input = document.createElement("input");
-  input.placeholder = "Rechercher dans la note";
-  input.spellcheck = false;
-  input.setAttribute("main-field", "true");
-  input.value = getSearchQuery(view.state).search;
-  const count = document.createElement("span");
-  count.className = "find-count";
-  dom.append(input, count);
+// ---------------------------------------------------------------------------
+// Recherche dans la note (⌘F) : une pastille flottante en bas, au centre,
+// loin des boutons du haut. ⌘F ou Échap la referment, en fondu.
+// ---------------------------------------------------------------------------
 
-  const refresh = () => {
-    const q = getSearchQuery(view.state);
-    if (!q.search || !q.valid) return (count.textContent = "");
-    let n = 0;
-    const cur = q.getCursor(view.state);
-    while (!cur.next().done && n < 999) n++;
-    count.textContent = n ? String(n) : "0";
-  };
-  input.addEventListener("input", () => {
-    view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: input.value })) });
-    refresh();
-  });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      (e.shiftKey ? findPrevious : findNext)(view);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      closeSearchPanel(view);
-      view.focus();
-    }
-  });
-  return {
-    dom,
-    top: true,
-    mount: () => {
-      input.select();
+let leaving: { view: EditorView; timer: ReturnType<typeof setTimeout> } | undefined;
+
+/** Ferme la barre de recherche avec une courte animation. */
+export function closeFind(view: EditorView) {
+  const dom = view.dom.querySelector<HTMLElement>(".find");
+  if (!dom || !searchPanelOpen(view.state)) return false;
+  if (leaving) return true;
+  dom.classList.remove("show");
+  const timer = setTimeout(() => {
+    leaving = undefined;
+    if (searchPanelOpen(view.state)) closeSearchPanel(view);
+  }, 140);
+  leaving = { view, timer };
+  view.focus();
+  return true;
+}
+
+/** Ouvre la barre (ou y remet le focus) ; la referme si elle a déjà le focus. */
+export function toggleFind(view: EditorView) {
+  const dom = view.dom.querySelector<HTMLElement>(".find");
+  if (leaving?.view === view) {
+    clearTimeout(leaving.timer);
+    leaving = undefined;
+    dom?.classList.add("show");
+  } else if (dom && searchPanelOpen(view.state) && dom.contains(document.activeElement)) {
+    return closeFind(view);
+  }
+  return openSearchPanel(view);
+}
+
+/** Texte recherché dans la barre de la note, si elle est ouverte. */
+export const findQuery = (view: EditorView) => (searchPanelOpen(view.state) ? getSearchQuery(view.state).search : "");
+
+function findPanel(onSearchAll: (q: string) => void) {
+  return (view: EditorView): Panel => {
+    const dom = document.createElement("div");
+    dom.className = "find";
+    dom.innerHTML = `${icon("search")}<input spellcheck="false" autocomplete="off" placeholder="Rechercher dans la note" main-field="true" /><span class="find-count"></span><span class="find-sep"></span>
+      <button class="find-btn" data-do="prev" tabindex="-1" title="Précédent (⇧↵)">${icon("up")}</button>
+      <button class="find-btn" data-do="next" tabindex="-1" title="Suivant (↵)">${icon("down")}</button>
+      <button class="find-btn" data-do="all" tabindex="-1" title="Chercher dans toutes les notes (${MODK}⇧F)">${icon("notes")}</button>
+      <button class="find-btn" data-do="close" tabindex="-1" title="Fermer (échap)">${icon("close")}</button>`;
+    const input = dom.querySelector("input")!;
+    const count = dom.querySelector<HTMLElement>(".find-count")!;
+    input.value = getSearchQuery(view.state).search;
+
+    const refresh = () => {
+      const q = getSearchQuery(view.state);
+      dom.classList.toggle("none", false);
+      if (!q.search || !q.valid) return (count.textContent = "");
+      const sel = view.state.selection.main;
+      let n = 0, cur = 0;
+      const it = q.getCursor(view.state);
+      for (let r = it.next(); !r.done && n < 999; r = it.next()) {
+        n++;
+        if (r.value.from === sel.from && r.value.to === sel.to) cur = n;
+      }
+      count.textContent = n ? (cur ? `${cur}/${n}` : String(n)) : "0";
+      dom.classList.toggle("none", !n);
+    };
+    const go = (back: boolean) => {
+      (back ? findPrevious : findNext)(view);
+      input.focus();
+    };
+    input.addEventListener("input", () => {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: input.value })) });
       refresh();
-    },
-    update: (u) => {
-      if (u.docChanged) refresh();
-    },
+    });
+    input.addEventListener("keydown", (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (e.key === "Enter" || (mod && e.key.toLowerCase() === "g") || e.key === "F3") {
+        e.preventDefault();
+        go(e.shiftKey);
+      } else if (e.key === "Escape" || (mod && !e.shiftKey && e.key.toLowerCase() === "f")) {
+        e.preventDefault();
+        closeFind(view);
+      }
+    });
+    dom.addEventListener("mousedown", (e) => {
+      if (e.target !== input) e.preventDefault();
+    });
+    dom.addEventListener("click", (e) => {
+      const what = (e.target as HTMLElement).closest<HTMLElement>("[data-do]")?.dataset.do;
+      if (what === "prev" || what === "next") go(what === "prev");
+      else if (what === "close") closeFind(view);
+      else if (what === "all") onSearchAll(input.value);
+    });
+    return {
+      dom,
+      top: false,
+      mount: () => {
+        input.select();
+        refresh();
+        requestAnimationFrame(() => dom.classList.add("show"));
+      },
+      update: (u) => {
+        for (const tr of u.transactions)
+          for (const e of tr.effects)
+            if (e.is(setSearchQuery) && e.value.search !== input.value) input.value = e.value.search;
+        if (u.docChanged || u.selectionSet || u.transactions.some((tr) => tr.effects.length)) refresh();
+      },
+    };
   };
 }
 
@@ -190,11 +257,22 @@ const theme = EditorView.theme({
 function emptyHint(isMac: boolean): HTMLElement {
   const el = document.createElement("span");
   const mod = isMac ? "⌘" : "Ctrl+";
-  el.innerHTML = `Écrivez…<br><span class="hint">${mod}P rechercher · ${mod}K actions · ${isMac ? "⌃" : "Ctrl+"}Espace onglets</span>`;
+  el.innerHTML = `Écrivez…<br><span class="hint">${mod}P notes · ${mod}⇧F rechercher · ${mod}K actions · ${isMac ? "⌃" : "Ctrl+"}Espace onglets</span>`;
   return el;
 }
 
-export function baseExtensions(isMac: boolean, onChange: (u: ViewUpdate) => void): Extension[] {
+// Raccourcis de recherche de CodeMirror, sauf ⌘F et Échap, gérés ci-dessus.
+const findKeymap = [
+  { key: "Mod-f", run: toggleFind, scope: "editor search-panel", preventDefault: true },
+  { key: "Escape", run: closeFind, scope: "editor search-panel" },
+  ...searchKeymap.filter((b) => b.key !== "Mod-f" && b.key !== "Escape"),
+];
+
+export function baseExtensions(
+  isMac: boolean,
+  onChange: (u: ViewUpdate) => void,
+  onSearchAll: (q: string) => void,
+): Extension[] {
   return [
     history(),
     drawSelection(),
@@ -210,9 +288,9 @@ export function baseExtensions(isMac: boolean, onChange: (u: ViewUpdate) => void
     markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: false }),
     syntaxHighlighting(highlightStyle),
     blockDecorations,
-    search({ top: true, createPanel: searchPanel }),
+    search({ top: false, createPanel: findPanel(onSearchAll) }),
     placeholder(emptyHint(isMac)),
-    keymap.of([...markdownKeymap, ...searchKeymap, ...historyKeymap, indentWithTab, ...defaultKeymap]),
+    keymap.of([...markdownKeymap, ...findKeymap, ...historyKeymap, indentWithTab, ...defaultKeymap]),
     theme,
     EditorView.updateListener.of(onChange),
   ];

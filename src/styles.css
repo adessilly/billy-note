@@ -155,17 +155,41 @@ html, body {
 .cm-listmark { color: var(--accent); }
 .cm-taskmark { color: var(--accent); font-family: var(--font-mono); }
 
-/* Recherche dans la note : un simple champ flottant. */
+/* Recherche dans la note : une pastille flottante en bas, au centre. */
 .cm-editor .cm-panels { background: transparent; border: none !important; z-index: 6; }
-.cm-editor .cm-panels-top { position: absolute; top: 10px; right: 16px; left: auto; }
-.find {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--panel); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6);
-  border-radius: 10px; box-shadow: var(--shadow); padding: 6px 12px; font-size: 13px;
+.cm-editor .cm-panels-bottom {
+  position: absolute; left: 0; right: 0; bottom: 18px; top: auto;
+  display: flex; justify-content: center; padding: 0 16px; pointer-events: none;
 }
-.find input { border: none; outline: none; background: transparent; color: var(--fg); font: inherit; width: 200px; }
+.find {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 2px; width: min(460px, 100%);
+  background: var(--panel); backdrop-filter: blur(24px) saturate(1.7); -webkit-backdrop-filter: blur(24px) saturate(1.7);
+  border-radius: 12px; box-shadow: var(--shadow); padding: 4px 4px 4px 12px; font-size: 13px;
+  opacity: 0; transform: translateY(10px) scale(0.98);
+  transition: opacity 0.14s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.find.show { opacity: 1; transform: none; }
+.find > .ico { width: 15px; height: 15px; color: var(--muted); margin-right: 6px; }
+.find input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--fg);
+  font: 13.5px var(--font-text); caret-color: var(--accent); padding: 5px 0;
+  -webkit-user-select: text; user-select: text;
+}
 .find input::placeholder { color: var(--muted); }
-.find-count { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.5em; text-align: right; }
+.find-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding: 0 6px; white-space: nowrap; }
+.find.none .find-count { color: var(--danger); }
+.find-sep { width: 1px; height: 16px; background: var(--panel-line); margin: 0 4px; }
+.find-btn {
+  width: 26px; height: 26px; border: none; border-radius: 7px; padding: 0;
+  display: grid; place-items: center; background: transparent; color: var(--muted); cursor: default;
+}
+.find-btn .ico { width: 15px; height: 15px; }
+.find-btn:hover { background: var(--hover); color: var(--fg); }
+.find-btn:active { transform: scale(0.92); }
+.find-btn[data-do="all"] { margin-left: 2px; }
+/* La notification passe au-dessus de la barre de recherche. */
+#app:has(.find) #toast { bottom: 72px; }
 
 /* ------------------------------------------------------------------ */
 /* Barre de défilement : fine, arrondie, visible seulement au besoin   */
@@ -365,6 +389,7 @@ html, body {
 :root[data-theme="dark"] #overlay.show { background: rgba(0, 0, 0, 0.35); }
 #overlay.show { background: rgba(0, 0, 0, 0.06); }
 #overlay.switching { align-items: center; padding-top: 0; }
+#overlay:not(.show) { pointer-events: none; }
 #overlay[hidden], #preview[hidden] { display: none; }
 
 .palette, .switcher {
@@ -373,8 +398,10 @@ html, body {
   border-radius: 14px; box-shadow: var(--shadow);
   overflow: hidden; font-size: 14px;
   opacity: 0; transform: translateY(-6px) scale(0.985);
-  transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: opacity 0.14s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1), width 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
+.palette.wide { width: min(720px, calc(100vw - 32px)); }
+.palette.wide .pal-list { max-height: min(500px, 62vh); }
 #overlay.show .palette, #overlay.show .switcher { opacity: 1; transform: none; }
 
 .pal-label { padding: 14px 18px 0; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -412,6 +439,33 @@ kbd {
   font: 11.5px var(--font-text); color: var(--muted); flex-shrink: 0;
   background: var(--hover); border-radius: 5px; padding: 2px 6px; white-space: pre;
 }
+/* Résultats groupés par note (⌘⇧F). */
+.pal-group {
+  display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 3px; font-size: 12.5px; font-weight: 600; color: var(--fg);
+}
+.pal-group:first-child { padding-top: 4px; }
+.pal-group .pal-ico { align-self: center; color: var(--muted); }
+.pal-group .pal-ico .ico { width: 14px; height: 14px; }
+.pal-gtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-group .pal-sub { font-weight: 400; }
+.pal-count {
+  margin-left: auto; font-size: 11px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums;
+  background: var(--hover); border-radius: 6px; padding: 0 6px; line-height: 18px; align-self: center;
+}
+.pal-item.hit { min-height: 30px; padding: 5px 12px; }
+.pal-ln {
+  width: 26px; flex-shrink: 0; text-align: right; color: var(--marker);
+  font: 11px var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.pal-item.hit.sel .pal-ln { color: var(--muted); }
+.pal-item.hit .pal-title { font-size: 13px; color: var(--muted); }
+.pal-item.hit.sel .pal-title { color: var(--fg); }
+.pal-item.hit .pal-title mark { background: var(--match); color: var(--fg); font-weight: 500; border-radius: 3px; padding: 0 1px; }
+.palette.wide .pal-item.disabled { background: none; color: var(--muted); }
+.pal-item.more { min-height: 28px; padding: 4px 12px 4px 22px; font-size: 12px; color: var(--muted); }
+.pal-item.more .pal-ico .ico { width: 13px; height: 13px; }
+.pal-item.more.sel { color: var(--fg); }
+
 .pal-foot { display: flex; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--panel-line); font-size: 11.5px; color: var(--muted); }
 .pal-foot kbd { padding: 1px 5px; margin-right: 4px; font-size: 11px; }
 .pal-foot .pal-ver { margin-left: auto; font-variant-numeric: tabular-nums; }

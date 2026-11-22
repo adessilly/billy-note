@@ -18,10 +18,22 @@ export interface Item {
   active?: boolean;
   /** Élément purement informatif (non sélectionnable). */
   disabled?: boolean;
+  /** En-tête de groupe (note) affiché au-dessus de cet élément. */
+  group?: { title: string; sub?: string; meta?: string; icon?: string };
+  /** Ligne trouvée : affiche son numéro à la place de l'icône. */
+  line?: number;
+  /** Ne ferme pas la palette (ex. « afficher plus »). */
+  keepOpen?: boolean;
   run?: () => unknown;
 }
 
 export interface Source {
+  /** Identifiant du mode, pour qu'un même raccourci ouvre puis ferme. */
+  mode?: string;
+  /** Carte plus large (recherche dans toutes les notes). */
+  wide?: boolean;
+  /** Icône du champ. */
+  icon?: string;
   placeholder: string;
   /** Petit libellé au-dessus du champ (mode question). */
   label?: string;
@@ -32,6 +44,33 @@ export interface Source {
   footer: (query: string) => string;
   /** Section à afficher au-dessus de la liste selon la requête. */
   heading?: (query: string) => string | undefined;
+}
+
+// Le voile est partagé par la palette et le sélecteur d'onglets : il apparaît
+// et disparaît en fondu, la carte glisse légèrement.
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showOverlay(overlay: HTMLElement, card: HTMLElement, switching: boolean) {
+  clearTimeout(hideTimer);
+  const already = !overlay.hidden && overlay.classList.contains("show") && overlay.firstChild === card;
+  overlay.replaceChildren(card);
+  overlay.hidden = false;
+  overlay.classList.toggle("switching", switching);
+  if (!already) {
+    overlay.classList.remove("show");
+    void overlay.offsetWidth; // repart de l'état initial pour animer l'entrée
+    overlay.classList.add("show");
+  }
+}
+
+function hideOverlay(overlay: HTMLElement) {
+  overlay.classList.remove("show");
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    overlay.hidden = true;
+    overlay.classList.remove("switching");
+    overlay.replaceChildren();
+  }, 160);
 }
 
 export class Palette {
@@ -45,6 +84,13 @@ export class Palette {
   private src?: Source;
   isOpen = false;
   onClose?: () => void;
+
+  get mode() {
+    return this.src?.mode;
+  }
+  get query() {
+    return this.input.value;
+  }
 
   constructor(private overlay: HTMLElement) {
     this.card = document.createElement("div");
@@ -81,11 +127,10 @@ export class Palette {
 
   open(src: Source) {
     this.src = src;
-    this.overlay.replaceChildren(this.card);
-    this.overlay.hidden = false;
-    this.overlay.classList.remove("switching");
-    requestAnimationFrame(() => this.overlay.classList.add("show"));
     this.isOpen = true;
+    this.card.classList.toggle("wide", !!src.wide);
+    this.card.querySelector(".pal-input .ico")!.outerHTML = icon(src.icon ?? "search");
+    showOverlay(this.overlay, this.card, false);
     this.labelEl.textContent = src.label ?? "";
     this.labelEl.hidden = !src.label;
     this.input.placeholder = src.placeholder;
@@ -109,8 +154,8 @@ export class Palette {
       (heading ? `<div class="pal-heading">${esc(heading)}</div>` : "") +
       this.items
         .map(
-          (it, i) => `${it.heading ? `<div class="pal-heading">${esc(it.heading)}</div>` : ""}<div class="pal-item${i === this.sel ? " sel" : ""}${it.disabled ? " disabled" : ""}${it.active ? " current" : ""}" data-i="${it.disabled ? "" : i}" role="option">
-            <span class="pal-ico">${icon(it.icon ?? "note")}</span>
+          (it, i) => `${it.heading ? `<div class="pal-heading">${esc(it.heading)}</div>` : ""}${it.group ? group(it.group) : ""}<div class="pal-item${i === this.sel ? " sel" : ""}${it.disabled ? " disabled" : ""}${it.active ? " current" : ""}${it.line ? " hit" : ""}${it.keepOpen ? " more" : ""}" data-i="${it.disabled ? "" : i}" role="option">
+            ${it.line ? `<span class="pal-ln">${it.line}</span>` : `<span class="pal-ico">${icon(it.icon ?? "note")}</span>`}
             <span class="pal-text"><span class="pal-title">${it.titleHtml ?? esc(it.title)}</span>${it.subHtml ? `<span class="pal-sub">${it.subHtml}</span>` : it.sub ? `<span class="pal-sub">${esc(it.sub)}</span>` : ""}</span>
             ${it.meta ? `<span class="pal-meta">${esc(it.meta)}</span>` : ""}
             ${it.kbd ? `<kbd>${esc(it.kbd)}</kbd>` : ""}
@@ -125,9 +170,7 @@ export class Palette {
   close() {
     if (!this.isOpen) return;
     this.isOpen = false;
-    this.overlay.classList.remove("show");
-    this.overlay.hidden = true;
-    this.overlay.replaceChildren();
+    hideOverlay(this.overlay);
     this.onClose?.();
   }
 
@@ -156,6 +199,7 @@ export class Palette {
   private run(i: number) {
     const it = this.items[i];
     if (!it || it.disabled || !it.run) return;
+    if (it.keepOpen) return void it.run();
     this.close();
     void it.run();
   }
@@ -195,6 +239,9 @@ export class Palette {
   }
 }
 
+const group = (g: NonNullable<Item["group"]>) =>
+  `<div class="pal-group"><span class="pal-ico">${icon(g.icon ?? "note")}</span><span class="pal-gtitle">${esc(g.title)}</span>${g.sub ? `<span class="pal-sub">${esc(g.sub)}</span>` : ""}${g.meta ? `<span class="pal-count">${esc(g.meta)}</span>` : ""}</div>`;
+
 /** Sélecteur d'onglets façon Alt+Tab : maintenir Ctrl, appuyer sur Espace. */
 export class Switcher {
   private card: HTMLDivElement;
@@ -221,10 +268,7 @@ export class Switcher {
     this.entries = entries;
     this.sel = entries.length > 1 ? (step > 0 ? 1 : entries.length - 1) : 0;
     this.isOpen = true;
-    this.overlay.replaceChildren(this.card);
-    this.overlay.hidden = false;
-    this.overlay.classList.add("switching");
-    requestAnimationFrame(() => this.overlay.classList.add("show"));
+    showOverlay(this.overlay, this.card, true);
     this.render();
   }
 
@@ -243,9 +287,7 @@ export class Switcher {
   close() {
     if (!this.isOpen) return;
     this.isOpen = false;
-    this.overlay.classList.remove("show", "switching");
-    this.overlay.hidden = true;
-    this.overlay.replaceChildren();
+    hideOverlay(this.overlay);
   }
 
   /** Renvoie true si la touche a été consommée. */
