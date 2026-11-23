@@ -51,6 +51,7 @@ Les images collées ou insérées (⌘K → « Insérer une image… ») sont en
 - ⌘S lui donne un nom : il devient un fichier `.md` dans le **dossier des notes**, ensuite enregistré automatiquement.
 - Dossier par défaut : `Documents/Billy Note`. Pour la synchro, choisissez un dossier iCloud Drive / OneDrive / Dropbox via ⌘K → « Choisir le dossier des notes ».
 - Les modifications faites sur un autre appareil sont rechargées quand la fenêtre reprend le focus.
+- Dans le menu des notes (⌘\), survoler une note fait apparaître **Renommer** (le nom devient modifiable sur place : Entrée valide, Échap annule) et **Mettre à la corbeille**. Si la note utilisait des images qu'aucune autre note n'emploie, la confirmation propose de les mettre à la corbeille avec elle.
 
 ## Développement
 

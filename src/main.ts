@@ -19,7 +19,7 @@ import { baseExtensions, closeFind, createState, findQuery, toggleFind } from ".
 import { renderPreview } from "./preview";
 import { Palette, Switcher, type Item, type Source } from "./palette";
 import { icon } from "./icons";
-import { debounce, dirname, esc, foldKeep, fuzzy, highlight, relDate, uid } from "./util";
+import { debounce, dirname, esc, foldKeep, fuzzy, highlight, relDate, resolvePath, uid } from "./util";
 
 // ---------------------------------------------------------------------------
 // État
@@ -326,22 +326,24 @@ function saveAs(tab: Tab, after?: () => void) {
       initial: suggestedName(tab),
       verb: "Enregistrer",
       sub: shortDir(),
-      run: async (name) => {
-        try {
-          const content = contentOf(tab);
-          const c = await api.createNote(name, content);
-          Object.assign(tab, { kind: "file", path: c.path, name: c.name, disk: content, mtime: c.mtime });
-          renderTabs();
-          saveSessionSoon();
-          refreshNotes();
-          toast(`Enregistrée dans ${shortDir()}`);
-          after?.();
-        } catch (e) {
-          toast(`Impossible d'enregistrer : ${e}`);
-        }
-      },
+      run: (name) => saveDraftAs(tab, name, after),
     }),
   );
+}
+
+async function saveDraftAs(tab: Tab, name: string, after?: () => void) {
+  try {
+    const content = contentOf(tab);
+    const c = await api.createNote(name, content);
+    Object.assign(tab, { kind: "file", path: c.path, name: c.name, disk: content, mtime: c.mtime });
+    renderTabs();
+    saveSessionSoon();
+    refreshNotes();
+    toast(`Enregistrée dans ${shortDir()}`);
+    after?.();
+  } catch (e) {
+    toast(`Impossible d'enregistrer : ${e}`);
+  }
 }
 
 async function save() {
@@ -359,20 +361,29 @@ function rename(tab = active) {
       initial: tab.name,
       select: true,
       verb: "Renommer en",
-      run: async (name) => {
-        try {
-          await flushWrite(tab);
-          const c = await api.renameNote(tab.path!, name);
-          Object.assign(tab, { path: c.path, name: c.name });
-          renderTabs();
-          saveSessionSoon();
-          refreshNotes();
-        } catch (e) {
-          toast(`Impossible de renommer : ${e}`);
-        }
-      },
+      run: (name) => renameFile(tab.path!, name),
     }),
   );
+}
+
+/** Renomme une note du dossier, ouverte dans un onglet ou non. */
+async function renameFile(path: string, name: string) {
+  const tab = tabs.find((t) => t.path === path);
+  try {
+    if (tab) await flushWrite(tab);
+    const c = await api.renameNote(path, name);
+    const note = notes.find((n) => n.path === path);
+    if (note) Object.assign(note, { path: c.path, name: c.name });
+    if (tab) {
+      Object.assign(tab, { path: c.path, name: c.name });
+      renderTabs();
+      saveSessionSoon();
+    }
+    if (sidebarOpen) renderSidebar();
+    refreshNotes();
+  } catch (e) {
+    toast(`Impossible de renommer : ${e}`);
+  }
 }
 
 function trash(tab = active) {
@@ -383,22 +394,75 @@ function trash(tab = active) {
       { title: "Annuler", icon: "close", run: () => {} },
     ]);
   }
-  ask(`Mettre « ${tab.name} » à la corbeille ?`, [
-    {
-      title: "Mettre à la corbeille",
-      icon: "trash",
-      run: async () => {
-        clearTimeout(writeTimers.get(tab.id));
-        try {
-          await api.trashNote(tab.path!);
-          removeTab(tab);
-          refreshNotes();
-          toast("Note mise à la corbeille");
-        } catch (e) {
-          toast(`Impossible de supprimer : ${e}`);
-        }
-      },
-    },
+  void trashFile(tab.path!, tab.name ?? "");
+}
+
+const IMAGE_RE = /!\[[^\]]*\]\(\s*<?([^)\s>]+)|<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)/gi;
+
+/** Images locales référencées par un texte, en chemins absolus. */
+function imageRefs(text: string, baseDir: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(IMAGE_RE)) {
+    let src = m[1] ?? m[2];
+    if (/^([a-z][a-z0-9+.-]*:|\/|\\|#)/i.test(src)) continue;
+    try {
+      src = decodeURIComponent(src);
+    } catch {}
+    if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(src)) out.add(resolvePath(baseDir, src));
+  }
+  return [...out];
+}
+
+/** Images de la note que plus aucune autre note (ni brouillon) n'utilise. */
+async function orphanImages(path: string): Promise<string[]> {
+  const tab = tabs.find((t) => t.path === path);
+  const text = tab ? contentOf(tab) : await api.readNote(path).then((r) => r.content, () => "");
+  const own = imageRefs(text, dirname(path));
+  if (!own.length) return [];
+  const exists = await api.statNotes(own).catch(() => own.map(() => null));
+  const candidates = own.filter((_, i) => exists[i] !== null);
+  if (!candidates.length) return [];
+  // Textes des autres notes : ceux des onglets (modifications en cours comprises),
+  // sinon le cache de la recherche, complété si besoin.
+  await refreshing;
+  await loadSearchCache();
+  const used = new Set<string>();
+  const key = (p: string) => p.toLowerCase();
+  for (const t of tabs) if (t.path !== path) imageRefs(contentOf(t), noteDir(t)).forEach((p) => used.add(key(p)));
+  for (const n of notes) {
+    if (n.path === path || tabs.some((t) => t.path === n.path)) continue;
+    const cached = textCache.get(n.path);
+    if (cached) imageRefs(cached.text, dirname(n.path)).forEach((p) => used.add(key(p)));
+  }
+  return candidates.filter((p) => !used.has(key(p)));
+}
+
+/** Corbeille d'une note du dossier, en proposant d'y joindre ses images orphelines. */
+async function trashFile(path: string, name: string) {
+  const orphans = await orphanImages(path).catch(() => []);
+  const run = (withImages: boolean) => async () => {
+    const tab = tabs.find((t) => t.path === path);
+    if (tab) clearTimeout(writeTimers.get(tab.id));
+    try {
+      await api.trashNote(path);
+      if (tab) removeTab(tab);
+      notes = notes.filter((n) => n.path !== path);
+      if (sidebarOpen) renderSidebar();
+      const n = withImages ? await api.trashImages(orphans) : 0;
+      refreshNotes();
+      toast(n ? `Note et ${n > 1 ? `ses ${n} images` : "son image"} mises à la corbeille` : "Note mise à la corbeille");
+    } catch (e) {
+      toast(`Impossible de supprimer : ${e}`);
+    }
+  };
+  const files = orphans.map((p) => p.split(/[\\/]/).pop()).join(", ");
+  ask(`Mettre « ${name} » à la corbeille ?`, [
+    ...(orphans.length
+      ? [
+          { title: orphans.length > 1 ? `Avec ses ${orphans.length} images` : "Avec son image", sub: files, icon: "image", run: run(true) },
+          { title: orphans.length > 1 ? "Garder les images" : "Garder l'image", sub: "la note seule", icon: "trash", run: run(false) },
+        ]
+      : [{ title: "Mettre à la corbeille", icon: "trash", run: run(false) }]),
     { title: "Annuler", icon: "close", run: () => {} },
   ]);
 }
@@ -695,13 +759,19 @@ let sidebarSticky = false;
 let edgeTimer: ReturnType<typeof setTimeout> | undefined;
 let leaveTimer: ReturnType<typeof setTimeout> | undefined;
 
+let renaming = false;
+
+const sbBtn = (act: string, ico: string, title: string, attr = "") =>
+  `<button class="sb-btn${act === "trash" ? " danger" : ""}" data-act="${act}" ${attr} title="${title}" tabindex="-1">${icon(ico)}</button>`;
+
 function renderSidebar() {
+  if (renaming) return;
   const open = tabs
     .map(
       (t) => `<div class="sb-item${t === active ? " on" : ""}" data-tab="${t.id}">
         <span class="pal-ico">${icon(t.kind === "draft" ? "draft" : "note")}</span>
         <span class="sb-title">${esc(titleOf(t))}</span>
-        <button class="sb-x" data-close="${t.id}" title="Fermer">${icon("close")}</button>
+        <span class="sb-acts">${t.kind === "draft" ? sbBtn("rename", "rename", "Nommer et enregistrer") : sbBtn("rename", "rename", "Renommer") + sbBtn("trash", "trash", "Mettre à la corbeille")}${sbBtn("close", "close", "Fermer", `data-close="${t.id}"`)}</span>
       </div>`,
     )
     .join("");
@@ -713,6 +783,7 @@ function renderSidebar() {
         <span class="pal-ico">${icon("note")}</span>
         <span class="sb-title">${esc(n.name)}</span>
         <span class="sb-meta">${esc(relDate(n.modified))}</span>
+        <span class="sb-acts">${sbBtn("rename", "rename", "Renommer")}${sbBtn("trash", "trash", "Mettre à la corbeille")}</span>
       </div>`,
     )
     .join("");
@@ -723,6 +794,40 @@ function renderSidebar() {
       ${files ? `<div class="sb-head">Dans le dossier</div>${files}` : ""}
     </div>
     <div class="sb-foot" data-reveal title="${esc(notesDir)}">${icon("cloud")}<span>${esc(shortDir())}</span></div>`;
+}
+
+/** Renommage en place : le titre de la ligne devient un champ. */
+function startRename(row: HTMLElement) {
+  const tab = byId(row.dataset.tab);
+  const path = tab ? tab.path : row.dataset.path;
+  const initial = tab ? (tab.kind === "draft" ? suggestedName(tab) : (tab.name ?? "")) : (row.dataset.name ?? "");
+  const input = document.createElement("input");
+  input.className = "sb-input";
+  input.value = initial;
+  input.placeholder = "Nom de la note";
+  input.spellcheck = false;
+  row.querySelector(".sb-title")!.replaceWith(input);
+  row.classList.add("editing");
+  renaming = true;
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = (commit: boolean) => {
+    if (finished) return;
+    finished = true;
+    renaming = false;
+    const name = input.value.trim();
+    if (commit && name && tab?.kind === "draft") void saveDraftAs(tab, name);
+    else if (commit && name && path && name !== initial) void renameFile(path, name);
+    if (sidebarOpen) renderSidebar();
+    if (document.activeElement === input || document.activeElement === document.body) focusContent();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.preventDefault(), finish(true);
+    else if (e.key === "Escape") e.preventDefault(), finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
 }
 
 function openSidebar(sticky: boolean) {
@@ -746,15 +851,29 @@ edgeEl.addEventListener("mouseenter", () => {
 edgeEl.addEventListener("mouseleave", () => clearTimeout(edgeTimer));
 sidebarEl.addEventListener("mouseenter", () => clearTimeout(leaveTimer));
 sidebarEl.addEventListener("mouseleave", () => {
-  if (!sidebarSticky) leaveTimer = setTimeout(closeSidebar, 260);
+  if (!sidebarSticky && !renaming) leaveTimer = setTimeout(closeSidebar, 260);
 });
-sidebarEl.addEventListener("mousedown", (e) => e.preventDefault());
+sidebarEl.addEventListener("mousedown", (e) => {
+  const input = sidebarEl.querySelector<HTMLInputElement>(".sb-input");
+  if (input && e.target === input) return;
+  e.preventDefault();
+  // Un clic ailleurs dans le menu valide le renommage en cours.
+  input?.blur();
+});
 sidebarEl.addEventListener("click", (e) => {
   const el = e.target as HTMLElement;
-  const close = el.closest<HTMLElement>("[data-close]")?.dataset.close;
-  if (close) {
-    const t = byId(close);
-    if (t) void closeTab(t);
+  if (el.closest(".sb-input")) return;
+  const act = el.closest<HTMLElement>("[data-act]")?.dataset.act;
+  const row = el.closest<HTMLElement>(".sb-item");
+  if (act && row) {
+    const t = byId(row.dataset.tab);
+    if (act === "close" && t) void closeTab(t);
+    else if (act === "rename") startRename(row);
+    else if (act === "trash") {
+      sidebarSticky = true;
+      if (t) trash(t);
+      else if (row.dataset.path) void trashFile(row.dataset.path, row.dataset.name ?? "");
+    }
     return;
   }
   const item = el.closest<HTMLElement>(".sb-item, [data-new], [data-reveal]");
@@ -766,7 +885,8 @@ sidebarEl.addEventListener("click", (e) => {
   if (!sidebarSticky) closeSidebar();
 });
 document.addEventListener("pointerdown", (e) => {
-  if (sidebarOpen && !sidebarEl.contains(e.target as Node) && !sideBtn.contains(e.target as Node)) closeSidebar();
+  const t = e.target as Node;
+  if (sidebarOpen && !sidebarEl.contains(t) && !sideBtn.contains(t) && !overlayEl.contains(t)) closeSidebar();
 });
 
 // ---------------------------------------------------------------------------
@@ -1527,6 +1647,8 @@ function onKey(e: KeyboardEvent) {
     switcher.handleKey(e);
     return;
   }
+  // Renommage dans le menu : le champ garde ses touches (Entrée, Échap, ⌘A…).
+  if (renaming && (e.target as HTMLElement).classList?.contains("sb-input")) return;
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const k = e.key.toLowerCase();
   const done = () => {

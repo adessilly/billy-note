@@ -19,6 +19,7 @@ export const api = {
   createNote: (name: string, content: string) => invoke<Created>("create_note", { name, content }),
   renameNote: (path: string, name: string) => invoke<Created>("rename_note", { path, name }),
   trashNote: (path: string) => invoke<void>("trash_note", { path }),
+  trashImages: (paths: string[]) => invoke<number>("trash_images", { paths }),
   statNotes: (paths: string[]) => invoke<(number | null)[]>("stat_notes", { paths }),
   loadSession: () => invoke<string | null>("load_session"),
   saveSession: (data: string) => invoke<void>("save_session", { data }),

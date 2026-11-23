@@ -368,10 +368,28 @@ html, body {
 .sb-item.on { background: var(--selected); font-weight: 500; }
 .sb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-meta { color: var(--muted); font-size: 11px; flex-shrink: 0; }
-.sb-x { border: none; background: none; color: var(--muted); padding: 2px; border-radius: 5px; display: none; }
-.sb-x .ico { width: 13px; height: 13px; }
-.sb-item:hover .sb-x { display: flex; }
-.sb-x:hover { background: var(--hover); color: var(--fg); }
+/* Actions au survol d'une ligne : elles prennent la place de la date. */
+.sb-item { min-height: 28px; box-sizing: border-box; }
+.sb-acts { display: none; gap: 1px; margin: -3px -5px -3px 0; flex-shrink: 0; }
+.sb-item:hover .sb-acts { display: flex; animation: sb-in 0.14s ease; }
+.sb-item:hover .sb-meta { display: none; }
+@keyframes sb-in { from { opacity: 0; } }
+.sb-btn {
+  display: flex; border: none; background: none; color: var(--muted);
+  padding: 3px; border-radius: 5px; cursor: default;
+}
+.sb-btn .ico { width: 14px; height: 14px; }
+.sb-btn:hover { background: var(--hover); color: var(--fg); }
+.sb-btn.danger:hover { color: var(--danger); }
+.sb-item.editing { background: var(--selected); }
+.sb-item.editing .sb-acts, .sb-item.editing .sb-meta { display: none; }
+.sb-input {
+  flex: 1; min-width: 0; margin: -3px -6px; padding: 2px 6px;
+  font: inherit; color: var(--fg); background: var(--panel-solid);
+  border: none; border-radius: 5px; outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.sb-input::placeholder { color: var(--muted); }
 .sb-new { color: var(--muted); }
 .sb-new span { flex: 1; }
 .sb-foot { margin: 0 6px 6px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--panel-line); border-radius: 0 0 7px 7px; padding-top: 9px; }

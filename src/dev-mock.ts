@@ -5,8 +5,8 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
   mockWindows("main");
   const files = new Map<string, { content: string; mtime: number }>([
-    ["/Notes/Idées.md", { content: "# Idées\n\n- [ ] Tester **Billy Note**\n- [x] Écrire du `code`\n\n```css\nbody { color: #333; margin: 0 auto; }\n```\n\n```js\nconst hello = (name) => `Bonjour ${name}`; // salut\n```\n\n> Une citation\n\nUn [lien](https://example.com).", mtime: Date.now() - 3600e3 }],
-    ["/Notes/Courses.md", { content: "# Courses\n\n1. Pain\n2. Fromage", mtime: Date.now() - 86400e3 * 3 }],
+    ["/Notes/Idées.md", { content: "# Idées\n\n- [ ] Tester **Billy Note**\n- [x] Écrire du `code`\n\n```css\nbody { color: #333; margin: 0 auto; }\n```\n\n```js\nconst hello = (name) => `Bonjour ${name}`; // salut\n```\n\n> Une citation\n\nUn [lien](https://example.com).\n\n![](images/capture.png)\n![](images/partagee.png)", mtime: Date.now() - 3600e3 }],
+    ["/Notes/Courses.md", { content: "# Courses\n\n1. Pain\n2. Fromage\n\n![](images/partagee.png)", mtime: Date.now() - 86400e3 * 3 }],
   ]);
   const name = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
   mockIPC((cmd, a: any) => {
@@ -22,7 +22,8 @@ if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
       case "create_note": { const path = `/Notes/${a.name}.md`; files.set(path, { content: a.content, mtime: Date.now() }); return { path, name: a.name, mtime: Date.now() }; }
       case "rename_note": { const f = files.get(a.path)!; files.delete(a.path); const path = `/Notes/${a.name}.md`; files.set(path, f); return { path, name: a.name, mtime: f.mtime }; }
       case "trash_note": files.delete(a.path); return null;
-      case "stat_notes": return a.paths.map((p: string) => files.get(p)?.mtime ?? null);
+      case "trash_images": return a.paths.length;
+      case "stat_notes": return a.paths.map((p: string) => files.get(p)?.mtime ?? (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(p) ? 1 : null));
       case "load_session": return localStorage.getItem("session");
       case "save_session": localStorage.setItem("session", a.data); return null;
       default: return null;

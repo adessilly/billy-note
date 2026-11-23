@@ -415,6 +415,18 @@ fn trash_note(app: AppHandle, path: String) -> Res<()> {
     trash::delete(&p).map_err(err)
 }
 
+/// Met des images du dossier des notes à la corbeille (celles qu'une note
+/// supprimée était seule à utiliser). Renvoie le nombre d'images supprimées.
+#[tauri::command]
+fn trash_images(app: AppHandle, paths: Vec<String>) -> usize {
+    paths
+        .iter()
+        .filter_map(|path| ensure_inside(&app, Path::new(path)).ok())
+        .filter(|p| image_ext(p).is_some() && p.is_file())
+        .filter(|p| trash::delete(p).is_ok())
+        .count()
+}
+
 /// Dates de modification des fichiers ouverts, pour détecter les changements
 /// apportés par la synchronisation (iCloud, OneDrive…) ou un autre appareil.
 #[tauri::command]
@@ -528,6 +540,7 @@ pub fn run() {
             create_note,
             rename_note,
             trash_note,
+            trash_images,
             stat_notes,
             load_session,
             save_session,
