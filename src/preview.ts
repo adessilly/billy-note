@@ -9,6 +9,8 @@ import { languages } from "@codemirror/language-data";
 import { highlightStyle } from "./editor";
 import { api } from "./backend";
 import { resolvePath } from "./util";
+import { icon } from "./icons";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -34,6 +36,46 @@ function enableTasks(root: HTMLElement) {
     const label = text.textContent?.trim().replace(/\s+/g, " ").slice(0, 120);
     box.setAttribute("aria-label", label || "Tâche");
   });
+}
+
+/** Bloc de code : un bouton « copier », discret, qui n'apparaît qu'au survol. */
+function addCopyButtons(root: HTMLElement) {
+  for (const pre of Array.from(root.querySelectorAll<HTMLElement>("pre"))) {
+    const box = document.createElement("div");
+    box.className = "code";
+    pre.replaceWith(box);
+    const btn = document.createElement("button");
+    btn.className = "copy";
+    btn.type = "button";
+    btn.title = "Copier";
+    btn.setAttribute("aria-label", "Copier le code");
+    btn.innerHTML = icon("copy") + icon("save");
+    box.append(pre, btn);
+  }
+}
+
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+async function copyCode(btn: HTMLElement) {
+  const text = btn.parentElement?.querySelector("pre")?.textContent ?? "";
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    await writeText(text);
+  }
+  document.querySelectorAll(".code .copy.done").forEach((b) => b.classList.remove("done"));
+  btn.classList.add("done");
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => btn.classList.remove("done"), 1400);
+}
+
+/** Clics sur les boutons « copier » de la vue consultation (délégués à `el`). */
+export function enableCopy(el: HTMLElement) {
+  el.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>(".code .copy");
+    if (btn) void copyCode(btn).catch(() => {});
+  });
+  // Un double-clic sur le bouton ne doit pas quitter la consultation.
+  el.addEventListener("dblclick", (e) => (e.target as HTMLElement).closest(".code .copy") && e.stopPropagation(), true);
 }
 
 const MIME: Record<string, string> = { svg: "image/svg+xml", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" };
@@ -87,6 +129,7 @@ export async function renderPreview(el: HTMLElement, source: string, baseDir = "
   body.append(tpl.content);
   el.replaceChildren(body);
   enableTasks(body);
+  addCopyButtons(body);
 
   for (const code of Array.from(body.querySelectorAll<HTMLElement>("pre > code"))) {
     const lang = Array.from(code.classList).find((c) => c.startsWith("language-"))?.slice(9);

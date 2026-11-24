@@ -15,6 +15,8 @@ export const api = {
     invoke<string>("save_image", bytes, { headers: { "x-note": encodeURIComponent(note), "x-name": encodeURIComponent(name) } }),
   importImage: (note: string, source: string) => invoke<string>("import_image", { note, source }),
   readImage: (path: string) => invoke<ArrayBuffer>("read_image", { path }),
+  /** Copie une note (et ses images) hors du dossier ; renvoie le nombre d'images copiées. */
+  exportNote: (dest: string, content: string, images: string[]) => invoke<number>("export_note", { dest, content, images }),
   writeNote: (path: string, content: string) => invoke<number>("write_note", { path, content }),
   createNote: (name: string, content: string) => invoke<Created>("create_note", { name, content }),
   renameNote: (path: string, name: string) => invoke<Created>("rename_note", { path, name }),

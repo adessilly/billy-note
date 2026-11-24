@@ -362,6 +362,33 @@ fn read_image(app: AppHandle, path: String) -> Res<tauri::ipc::Response> {
     Ok(tauri::ipc::Response::new(fs::read(&p).map_err(err)?))
 }
 
+/// Exporte une note hors du dossier des notes : le texte (liens d'images déjà
+/// réécrits en « images/… » par le front) dans `dest`, et ses images dans le
+/// sous-dossier « images » à côté. Renvoie le nombre d'images copiées.
+#[tauri::command]
+fn export_note(app: AppHandle, dest: String, content: String, images: Vec<String>) -> Res<usize> {
+    let dest = PathBuf::from(dest);
+    let dir = dest.parent().ok_or("chemin invalide")?;
+    let root = notes_dir(&app)?;
+    let root = root.canonicalize().unwrap_or(root);
+    if dir.canonicalize().map_err(err)?.starts_with(&root) {
+        return Err("choisissez un dossier en dehors du dossier des notes".into());
+    }
+    write_atomic(&dest, content.as_bytes())?;
+    let mut copied = 0;
+    for src in images.iter().filter_map(|p| ensure_inside(&app, Path::new(p)).ok()) {
+        let Some(name) = src.file_name() else { continue };
+        if image_ext(&src).is_none() || !src.is_file() {
+            continue;
+        }
+        let target = dir.join("images");
+        fs::create_dir_all(&target).map_err(err)?;
+        fs::copy(&src, target.join(name)).map_err(err)?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
 #[tauri::command]
 fn write_note(app: AppHandle, path: String, content: String) -> Res<f64> {
     let p = ensure_inside(&app, Path::new(&path))?;
@@ -536,6 +563,7 @@ pub fn run() {
             save_image,
             import_image,
             read_image,
+            export_note,
             write_note,
             create_note,
             rename_note,

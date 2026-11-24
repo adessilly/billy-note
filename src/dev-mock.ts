@@ -18,6 +18,7 @@ if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
       case "save_image": return "images/image-demo.png";
       case "import_image": return "images/photo.png";
       case "read_image": return null;
+      case "export_note": return a.images.length;
       case "write_note": files.set(a.path, { content: a.content, mtime: Date.now() }); return Date.now();
       case "create_note": { const path = `/Notes/${a.name}.md`; files.set(path, { content: a.content, mtime: Date.now() }); return { path, name: a.name, mtime: Date.now() }; }
       case "rename_note": { const f = files.get(a.path)!; files.delete(a.path); const path = `/Notes/${a.name}.md`; files.set(path, f); return { path, name: a.name, mtime: f.mtime }; }

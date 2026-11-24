@@ -14,11 +14,13 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-set-theme",
     "dialog:allow-open",
+    "dialog:allow-save",
     "opener:allow-open-url",
     "opener:allow-reveal-item-in-dir",
     "window-state:default",
     "updater:default",
     "process:allow-restart",
-    "clipboard-manager:allow-read-image"
+    "clipboard-manager:allow-read-image",
+    "clipboard-manager:allow-write-text"
   ]
 }

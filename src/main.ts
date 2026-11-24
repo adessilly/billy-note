@@ -11,12 +11,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readImage as readClipboardImage } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, type NoteInfo } from "./backend";
 import { baseExtensions, closeFind, createState, findQuery, toggleFind } from "./editor";
-import { renderPreview } from "./preview";
+import { enableCopy, renderPreview } from "./preview";
 import { Palette, Switcher, type Item, type Source } from "./palette";
 import { icon } from "./icons";
 import { debounce, dirname, esc, foldKeep, fuzzy, highlight, relDate, resolvePath, uid } from "./util";
@@ -50,6 +50,8 @@ interface Session {
   theme: Theme;
   zoom: number;
   flatHeadings?: boolean;
+  /** Dernier dossier d'export. */
+  exportDir?: string;
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -74,6 +76,7 @@ let mru: string[] = [];
 let theme: Theme = "system";
 let zoom = 16;
 let flatHeadings = false;
+let exportDir = "";
 let notes: NoteInfo[] = [];
 const states = new Map<string, EditorState>();
 const writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -280,6 +283,7 @@ function serializeSession(): string {
     theme,
     zoom,
     flatHeadings,
+    exportDir: exportDir || undefined,
     tabs: tabs.map((t) => {
       const content = contentOf(t);
       return {
@@ -411,6 +415,40 @@ function imageRefs(text: string, baseDir: string): string[] {
     if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(src)) out.add(resolvePath(baseDir, src));
   }
   return [...out];
+}
+
+/** Copie la note en Markdown hors du dossier des notes, avec ses images
+ *  (placées dans « images/ » à côté du fichier, liens réécrits en conséquence). */
+async function exportNote(tab = active) {
+  const name = ((tab.kind === "file" ? tab.name : suggestedName(tab)) || "Sans titre").replace(/[\\/:*?"<>|]/g, "-");
+  const ext = tab.path?.match(/\.(md|markdown|txt)$/i)?.[0] ?? ".md";
+  const dest = await saveDialog({
+    title: "Exporter la note",
+    defaultPath: exportDir ? `${exportDir}${exportDir.includes("\\") ? "\\" : "/"}${name}${ext}` : `${name}${ext}`,
+    filters: [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }],
+  });
+  if (!dest) return;
+  const base = noteDir(tab);
+  const images = new Set<string>();
+  const content = contentOf(tab).replace(IMAGE_RE, (m, a?: string, b?: string) => {
+    const src = (a ?? b)!;
+    if (/^([a-z][a-z0-9+.-]*:|\/|\\|#)/i.test(src) || !/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(src)) return m;
+    let rel = src;
+    try {
+      rel = decodeURIComponent(src);
+    } catch {}
+    images.add(resolvePath(base, rel));
+    return m.slice(0, m.length - src.length) + `images/${src.split("/").pop()}`;
+  });
+  try {
+    const n = await api.exportNote(dest, content, [...images]);
+    exportDir = dirname(dest);
+    saveSessionSoon();
+    const where = exportDir.split(/[\\/]/).filter(Boolean).pop() ?? exportDir;
+    toast(`Exportée dans ${where}${n ? ` avec ${n > 1 ? `ses ${n} images` : "son image"}` : ""}`);
+  } catch (e) {
+    toast(`Impossible d'exporter : ${e}`);
+  }
 }
 
 /** Images de la note que plus aucune autre note (ni brouillon) n'utilise. */
@@ -946,6 +984,7 @@ const actions: Action[] = [
   { title: "Changer d'onglet", keys: "switch tabs onglets", kbd: `${CTRL}Espace`, icon: "tabs", run: () => openSwitcher(1) },
   { title: "Afficher le menu", keys: "sidebar menu liste notes", kbd: `${MOD}\\`, icon: "sidebar", run: () => openSidebar(true) },
   { title: "Fermer l'onglet", keys: "close", kbd: `${MOD}W`, icon: "close", run: () => closeTab() },
+  { title: "Exporter la note…", keys: "export exporter copier sauvegarder markdown md fichier dossier externe", icon: "export", run: () => exportNote() },
   { title: "Mettre à la corbeille", keys: "supprimer delete trash effacer", icon: "trash", run: () => trash() },
   { title: "Thème clair", keys: "light blanc theme", icon: "sun", run: () => setTheme("light"), active: () => theme === "light" },
   { title: "Thème sombre", keys: "dark noir theme", icon: "moon", run: () => setTheme("dark"), active: () => theme === "dark" },
@@ -1568,6 +1607,7 @@ document.addEventListener("mousemove", (e) => {
 });
 
 previewEl.tabIndex = -1;
+enableCopy(previewEl);
 previewEl.addEventListener("dblclick", (e) => {
   if (!(e.target as HTMLElement).closest("input")) togglePreview();
 });
@@ -1741,6 +1781,7 @@ async function restore() {
   theme = s.theme ?? "system";
   zoom = s.zoom ?? 16;
   flatHeadings = s.flatHeadings ?? false;
+  exportDir = s.exportDir ?? "";
 
   const restored = await Promise.all(
     (s.tabs ?? []).map(async (t): Promise<Tab | null> => {

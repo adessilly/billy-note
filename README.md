@@ -39,7 +39,7 @@ Ensuite, l'application se met à jour toute seule (voir [Mises à jour automatiq
 
 Les onglets apparaissent en faisant défiler vers le haut ou en survolant le haut de la fenêtre ; on les réordonne en les faisant glisser.
 Pour déplacer la fenêtre : glisser depuis une marge autour du texte (haut, côtés ou sous la dernière ligne).
-En vue consultation, les cases `- [ ]` se cochent d'un clic (ou Espace) et la note est mise à jour.
+En vue consultation, les cases `- [ ]` se cochent d'un clic (ou Espace) et la note est mise à jour ; survoler un bloc de code fait apparaître un bouton pour le copier.
 
 ⌘⇧F ouvre la recherche dans le texte de toutes les notes (sans tenir compte des accents ni des majuscules) : les résultats sont groupés par note, une ligne par passage avec son numéro, et en choisir un ouvre la note sur le passage trouvé. Depuis la barre ⌘F, ⌘⇧F (ou son bouton) reprend la même recherche dans toutes les notes. ⌘P montre aussi les premières notes dont le texte correspond.
 
@@ -51,6 +51,7 @@ Les images collées ou insérées (⌘K → « Insérer une image… ») sont en
 - ⌘S lui donne un nom : il devient un fichier `.md` dans le **dossier des notes**, ensuite enregistré automatiquement.
 - Dossier par défaut : `Documents/Billy Note`. Pour la synchro, choisissez un dossier iCloud Drive / OneDrive / Dropbox via ⌘K → « Choisir le dossier des notes ».
 - Les modifications faites sur un autre appareil sont rechargées quand la fenêtre reprend le focus.
+- ⌘K → « Exporter la note… » enregistre une copie Markdown (`.md`) de la note ouverte où l'on veut, hors du dossier des notes ; ses images sont copiées dans un sous-dossier `images/` à côté, avec les liens ajustés.
 - Dans le menu des notes (⌘\), survoler une note fait apparaître **Renommer** (le nom devient modifiable sur place : Entrée valide, Échap annule) et **Mettre à la corbeille**. Si la note utilisait des images qu'aucune autre note n'emploie, la confirmation propose de les mettre à la corbeille avec elle.
 
 ## Développement
