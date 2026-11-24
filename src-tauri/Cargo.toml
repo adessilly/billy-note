@@ -1,6 +1,6 @@
 [package]
 name = "billy-note"
-version = "0.6.0"
+version = "0.7.0"
 description = "Bloc-notes minimaliste Markdown"
 license = "MIT"
 edition = "2021"
